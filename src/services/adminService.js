@@ -9,6 +9,16 @@ const adminService = {
   rejectDeliverer: (delivererId, reason) =>
     api.post(`/admin/deliverers/${delivererId}/reject`, { reason }).then((r) => r.data),
 
+  // Pièce justificative renvoyée en blob (le jeton Bearer ne passe pas par un simple lien).
+  documentBlob: (documentId) =>
+    api.get(`/admin/documents/${documentId}`, { responseType: 'blob' }).then((r) => r.data),
+
+  // Messages du formulaire Contactez-nous ; la réponse porte aussi `new_count` (non lus).
+  messages: ({ status, page = 1 } = {}) =>
+    api.get('/admin/messages', { params: { page, ...(status ? { status } : {}) } }).then((r) => r.data),
+  setMessageStatus: (messageId, status) =>
+    api.patch(`/admin/messages/${messageId}/status`, { status }).then((r) => r.data),
+
   disputes: (status) => api.get('/admin/disputes', { params: status ? { status } : {} }).then((r) => r.data),
   assignDispute: (disputeId, assignedTo) =>
     api.post(`/admin/disputes/${disputeId}/assign`, { assigned_to: assignedTo }).then((r) => r.data),

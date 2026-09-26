@@ -19,7 +19,9 @@ export default function ProtectedRoute({ roles, children }) {
   }
 
   if (status !== 'authenticated' || !user) {
-    return <Navigate to="/connexion" state={{ from: location }} replace />;
+    // L'espace administrateur a sa propre page de connexion ; les autres profils utilisent la connexion publique.
+    const loginPath = roles?.length === 1 && roles[0] === 'admin' ? '/admin/connexion' : '/connexion';
+    return <Navigate to={loginPath} state={{ from: location }} replace />;
   }
 
   if (roles && !roles.includes(user.role)) {

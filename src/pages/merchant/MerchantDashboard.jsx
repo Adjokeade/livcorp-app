@@ -52,7 +52,7 @@ export default function MerchantDashboard() {
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
       <div>
-        <h1 className="font-display text-2xl font-bold">Tableau de bord — {shop.shop_name || 'Ma boutique'}</h1>
+        <h1 className="font-display text-2xl font-bold">Tableau de bord : {shop.shop_name || 'Ma boutique'}</h1>
 
         <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-4">
           <StatCard label="Commandes totales" value={stats.orders_total} />
@@ -65,14 +65,14 @@ export default function MerchantDashboard() {
         <div className="mt-3 flex flex-col gap-3">
           {orders.length === 0 && <p className="text-on-surface-variant">Aucune commande pour le moment.</p>}
           {orders.map((order) => (
-            <Card key={order.id} className="flex items-center justify-between">
-              <div>
+            <Card key={order.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <p className="font-semibold">#{order.reference}</p>
                 <p className="text-sm text-on-surface-variant">
                   {order.client?.first_name} {order.client?.last_name}
                 </p>
               </div>
-              <div className="flex items-center gap-3">
+              <div className="flex flex-shrink-0 items-center gap-3">
                 <span className="font-display font-bold text-primary">{order.price} FCFA</span>
                 <StatusBadge status={order.status} />
               </div>

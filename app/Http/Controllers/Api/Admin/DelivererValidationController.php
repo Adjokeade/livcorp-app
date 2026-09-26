@@ -4,9 +4,12 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Deliverer;
+use App\Models\Document;
 use App\Notifications\DelivererAccountApproved;
+use App\Notifications\DelivererAccountRejected;
 use App\Services\AuditLogService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Validation des comptes livreurs par l'administrateur.
@@ -22,6 +25,17 @@ class DelivererValidationController extends Controller
             ->with(['user', 'user.documents'])
             ->latest()
             ->paginate(15);
+    }
+
+    /**
+     * Sert une pièce justificative depuis le disque privé. L'authentification
+     * passe par le jeton Bearer : le front la récupère en blob (pas de lien direct).
+     */
+    public function document(Document $document)
+    {
+        abort_unless(Storage::disk('documents_private')->exists($document->path), 404, 'Document introuvable.');
+
+        return Storage::disk('documents_private')->response($document->path);
     }
 
     public function approve(Request $request, Deliverer $deliverer)
@@ -49,6 +63,8 @@ class DelivererValidationController extends Controller
         ]);
 
         $this->auditLog->log('deliverer.rejected', $deliverer, ['reason' => $validated['reason']]);
+
+        rescue(fn () => $deliverer->user->notify(new DelivererAccountRejected($deliverer)));
 
         return $deliverer->fresh('user');
     }

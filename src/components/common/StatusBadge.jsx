@@ -10,11 +10,18 @@ const STATUS_MAP = {
   litige: { label: 'En litige', color: 'bg-error-container text-on-error-container' },
 };
 
-export default function StatusBadge({ status }) {
+// Le livreur ne lit pas les libellés comme le client ("vers vous" n'aurait pas de sens pour lui).
+const DELIVERER_LABELS = {
+  acceptee: 'Acceptée',
+  en_cours_livraison: 'En livraison',
+};
+
+export default function StatusBadge({ status, forDeliverer = false, className = '' }) {
   const entry = STATUS_MAP[status] ?? { label: status, color: 'bg-surface-container text-on-surface-variant' };
+  const label = (forDeliverer && DELIVERER_LABELS[status]) || entry.label;
   return (
-    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${entry.color}`}>
-      {entry.label}
+    <span className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold ${entry.color} ${className}`}>
+      {label}
     </span>
   );
 }

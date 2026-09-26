@@ -11,8 +11,14 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
-        channels: __DIR__.'/../routes/channels.php',
         health: '/up',
+    )
+    // Endpoint /broadcasting/auth sous le guard token (Sanctum), pas sous le
+    // groupe "web" : le front s'authentifie au canal privé avec un Bearer token,
+    // sans cookie de session ni CSRF.
+    ->withBroadcasting(
+        __DIR__.'/../routes/channels.php',
+        ['middleware' => ['auth:sanctum']],
     )
     ->withProviders([
         App\Providers\AuthServiceProvider::class,

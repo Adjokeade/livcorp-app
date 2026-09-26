@@ -7,12 +7,22 @@ import Spinner from '../../components/common/Spinner';
 const TABS = [
   { key: 'overview', label: 'Vue d\'ensemble' },
   { key: 'deliverers', label: 'Validation livreurs' },
+  { key: 'messages', label: 'Messages' },
   { key: 'disputes', label: 'Litiges' },
   { key: 'tasks', label: 'Tâches internes' },
 ];
 
 export default function AdminBackOffice() {
   const [tab, setTab] = useState('overview');
+  const [newMessages, setNewMessages] = useState(0);
+
+  // Badge de l'onglet Messages : chargé dès l'arrivée sur le back-office.
+  useEffect(() => {
+    adminService
+      .messages({ status: 'nouveau' })
+      .then((r) => setNewMessages(r.new_count ?? 0))
+      .catch(() => {});
+  }, []);
 
   return (
     <div>
@@ -28,6 +38,11 @@ export default function AdminBackOffice() {
             }`}
           >
             {t.label}
+            {t.key === 'messages' && newMessages > 0 && (
+              <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-xs font-bold text-on-primary">
+                {newMessages}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -35,6 +50,7 @@ export default function AdminBackOffice() {
       <div className="mt-6">
         {tab === 'overview' && <Overview />}
         {tab === 'deliverers' && <DelivererValidation />}
+        {tab === 'messages' && <Messages onCountChange={setNewMessages} />}
         {tab === 'disputes' && <Disputes />}
         {tab === 'tasks' && <Tasks />}
       </div>
@@ -109,6 +125,20 @@ function DelivererValidation() {
     }
   }
 
+  async function openDocument(doc) {
+    // L'onglet doit être ouvert de façon synchrone au clic, sinon le navigateur bloque la fenêtre.
+    const tab = window.open('', '_blank');
+    try {
+      const blob = await adminService.documentBlob(doc.id);
+      const url = URL.createObjectURL(blob);
+      if (tab) tab.location.href = url;
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch {
+      tab?.close();
+      window.alert('Impossible d\'ouvrir ce document.');
+    }
+  }
+
   async function handleReject(id) {
     const reason = window.prompt('Motif du refus (visible par le livreur) :');
     if (!reason) return;
@@ -127,8 +157,8 @@ function DelivererValidation() {
     <div className="flex flex-col gap-3">
       {pending.length === 0 && <p className="text-on-surface-variant">Aucun compte livreur en attente.</p>}
       {pending.map((deliverer) => (
-        <Card key={deliverer.id} className="flex items-center justify-between">
-          <div>
+        <Card key={deliverer.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <p className="font-semibold">
               {deliverer.user?.first_name} {deliverer.user?.last_name}
             </p>
@@ -136,17 +166,187 @@ function DelivererValidation() {
               {deliverer.vehicle_type} · {deliverer.vehicle_plate} · {deliverer.user?.documents?.length ?? 0} pièce(s)
               jointe(s)
             </p>
+            {deliverer.user?.documents?.length > 0 && (
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-sm">
+                {deliverer.user.documents.map((doc) => (
+                  <button
+                    key={doc.id}
+                    type="button"
+                    onClick={() => openDocument(doc)}
+                    className="font-semibold text-secondary underline"
+                  >
+                    {doc.type === 'piece_identite' ? "Voir la pièce d'identité" : doc.type === 'permis_conduire' ? 'Voir le permis' : 'Voir le document'}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
-          <div className="flex gap-2">
-            <Button variant="secondary" onClick={() => handleReject(deliverer.id)} disabled={busyId === deliverer.id}>
+          <div className="flex flex-shrink-0 gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => handleReject(deliverer.id)}
+              disabled={busyId === deliverer.id}
+              className="flex-1 sm:flex-none"
+            >
               Refuser
             </Button>
-            <Button onClick={() => handleApprove(deliverer.id)} disabled={busyId === deliverer.id}>
+            <Button
+              onClick={() => handleApprove(deliverer.id)}
+              disabled={busyId === deliverer.id}
+              className="flex-1 sm:flex-none"
+            >
               {busyId === deliverer.id ? '…' : 'Approuver'}
             </Button>
           </div>
         </Card>
       ))}
+    </div>
+  );
+}
+
+// ------------------------------------------------------------------
+// Messages du formulaire Contactez-nous — GET /admin/messages
+// ------------------------------------------------------------------
+function Messages({ onCountChange }) {
+  const [filter, setFilter] = useState('nouveau'); // 'nouveau' | 'tous'
+  const [page, setPage] = useState(1);
+  const [result, setResult] = useState(null);
+  const [error, setError] = useState('');
+  const [busyId, setBusyId] = useState(null);
+
+  async function load(nextFilter = filter, nextPage = page) {
+    try {
+      const data = await adminService.messages({ status: nextFilter === 'tous' ? undefined : nextFilter, page: nextPage });
+      setResult(data);
+      onCountChange(data.new_count ?? 0);
+      setError('');
+    } catch {
+      setError('Impossible de charger les messages. Réessayez.');
+    }
+  }
+
+  useEffect(() => {
+    load(filter, page);
+  }, [filter, page]);
+
+  function changeFilter(next) {
+    setResult(null);
+    setPage(1);
+    setFilter(next);
+  }
+
+  async function toggleStatus(message) {
+    setBusyId(message.id);
+    try {
+      await adminService.setMessageStatus(message.id, message.status === 'nouveau' ? 'traite' : 'nouveau');
+      await load();
+    } catch {
+      setError('La mise à jour a échoué. Réessayez.');
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  return (
+    <div>
+      <div className="flex gap-2">
+        {[
+          { key: 'nouveau', label: 'Nouveaux' },
+          { key: 'tous', label: 'Tous' },
+        ].map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            onClick={() => changeFilter(f.key)}
+            className={`rounded border px-3 py-1.5 text-sm font-semibold transition ${
+              filter === f.key
+                ? 'border-primary bg-primary-fixed text-on-primary-fixed-variant'
+                : 'border-outline-variant text-on-surface-variant'
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {error && (
+        <p role="alert" className="mt-4 rounded bg-error-container px-3 py-2 text-sm text-on-error-container">
+          {error}
+        </p>
+      )}
+
+      {!result && !error && <Loading />}
+
+      {result && (
+        <div className="mt-4 flex flex-col gap-3">
+          {result.data.length === 0 && (
+            <p className="text-on-surface-variant">
+              {filter === 'nouveau' ? 'Aucun nouveau message.' : 'Aucun message reçu pour le moment.'}
+            </p>
+          )}
+
+          {result.data.map((message) => (
+            <Card key={message.id}>
+              <div className="flex flex-col gap-1 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0">
+                  <p className="break-words font-semibold">{message.subject}</p>
+                  <p className="text-sm text-on-surface-variant">
+                    {message.name} ·{' '}
+                    <a href={`mailto:${message.email}`} className="break-all text-secondary underline">
+                      {message.email}
+                    </a>
+                    {message.phone && (
+                      <>
+                        {' '}
+                        ·{' '}
+                        <a href={`tel:${message.phone}`} className="text-secondary underline">
+                          {message.phone}
+                        </a>
+                      </>
+                    )}
+                  </p>
+                </div>
+                <p className="flex-shrink-0 text-xs text-on-surface-variant">
+                  {new Date(message.created_at).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short' })}
+                </p>
+              </div>
+
+              <p className="mt-3 whitespace-pre-wrap break-words text-sm">{message.message}</p>
+
+              <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+                <a
+                  href={`mailto:${message.email}?subject=${encodeURIComponent(`Re: ${message.subject}`)}`}
+                  className="btn-primary flex-1 sm:flex-none"
+                >
+                  Répondre
+                </a>
+                <Button
+                  variant="secondary"
+                  onClick={() => toggleStatus(message)}
+                  disabled={busyId === message.id}
+                  className="flex-1 sm:flex-none"
+                >
+                  {busyId === message.id ? '…' : message.status === 'nouveau' ? 'Marquer comme traité' : 'Rouvrir'}
+                </Button>
+              </div>
+            </Card>
+          ))}
+
+          {result.last_page > 1 && (
+            <div className="flex items-center justify-between gap-3 pt-2 text-sm">
+              <Button variant="secondary" onClick={() => setPage((p) => p - 1)} disabled={page <= 1}>
+                Précédent
+              </Button>
+              <span className="text-on-surface-variant">
+                Page {result.current_page} sur {result.last_page}
+              </span>
+              <Button variant="secondary" onClick={() => setPage((p) => p + 1)} disabled={page >= result.last_page}>
+                Suivant
+              </Button>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -183,12 +383,12 @@ function Disputes() {
     <div className="flex flex-col gap-3">
       {disputes.length === 0 && <p className="text-on-surface-variant">Aucun litige ouvert.</p>}
       {disputes.map((dispute) => (
-        <Card key={dispute.id} className="flex items-center justify-between">
-          <div>
+        <Card key={dispute.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <p className="font-semibold">Commande #{dispute.order?.reference}</p>
             <p className="text-sm text-on-surface-variant">{dispute.reason}</p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-shrink-0 items-center gap-3">
             <span className="rounded-full bg-error-container px-3 py-1 text-xs font-semibold text-on-error-container">
               {dispute.status}
             </span>

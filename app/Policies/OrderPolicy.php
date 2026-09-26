@@ -25,14 +25,21 @@ class OrderPolicy
 
     public function accept(User $user, Order $order): bool
     {
-        return $user->isLivreur()
-            && $user->deliverer?->isVerified()
-            && is_null($order->deliverer_id);
+        // Réservé aux livreurs validés. La disponibilité de la course (déjà prise, annulée) est tranchée dans
+        // le contrôleur, sous verrou, pour répondre "n'est plus disponible" plutôt qu'un refus d'autorisation.
+        return $user->isLivreur() && $user->deliverer?->isVerified();
     }
 
     public function updateStatus(User $user, Order $order): bool
     {
         return $user->isLivreur() && $order->deliverer_id === $user->deliverer?->id;
+    }
+
+    /** Conversation : le client de la commande et son livreur actuel, personne d'autre. */
+    public function chat(User $user, Order $order): bool
+    {
+        return $order->deliverer_id !== null
+            && ($order->client_id === $user->id || ($user->isLivreur() && $order->deliverer_id === $user->deliverer?->id));
     }
 
     public function track(User $user, Order $order): bool

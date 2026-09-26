@@ -13,7 +13,7 @@ class Deliverer extends Model
 
     protected $fillable = [
         'user_id', 'verification_status', 'rejection_reason', 'vehicle_type', 'vehicle_plate',
-        'is_available', 'current_lat', 'current_lng', 'location_updated_at',
+        'emergency_phone', 'is_available', 'current_lat', 'current_lng', 'location_updated_at',
         'average_rating', 'total_deliveries', 'wallet_balance', 'mobile_money_number',
         'verified_at', 'verified_by',
     ];
@@ -54,6 +54,28 @@ class Deliverer extends Model
     public function trackingPoints(): HasMany
     {
         return $this->hasMany(TrackingPoint::class);
+    }
+
+    /**
+     * Recalcule note moyenne, nombre de livraisons et solde à recevoir depuis les
+     * données sources (avis, commandes livrées, commissions). Idempotent : les
+     * colonnes ne sont qu'un cache, on peut l'appeler autant de fois que voulu.
+     *
+     * Solde = net des commissions pas encore versées ("due", ou incluses dans un
+     * versement en cours), donc ce que LIV corp doit encore au livreur.
+     */
+    public function refreshStats(): void
+    {
+        $rating = $this->reviews()->avg('rating');
+
+        $this->update([
+            'average_rating' => $rating === null ? 0 : round((float) $rating, 2),
+            'total_deliveries' => $this->orders()->where('status', Order::STATUS_LIVREE)->count(),
+            'wallet_balance' => Commission::where('beneficiary_id', $this->user_id)
+                ->where('beneficiary_type', 'livreur')
+                ->whereIn('status', ['due', 'included_in_payout'])
+                ->sum('net_amount'),
+        ]);
     }
 
     public function isVerified(): bool

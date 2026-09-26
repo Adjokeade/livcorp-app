@@ -17,7 +17,13 @@ Broadcast::channel('order.{orderId}', function ($user, int $orderId) {
         return false;
     }
 
-    return $order->client_id === $user->id
-        || $order->deliverer_id === $user->deliverer?->id
-        || $user->isAdmin();
+    if ($user->isAdmin() || $order->client_id === $user->id) {
+        return true;
+    }
+
+    // Livreur assigné uniquement. Le test explicite sur null évite qu'un
+    // utilisateur sans profil livreur ne matche une commande non assignée
+    // (null === null).
+    return $order->deliverer_id !== null
+        && $order->deliverer_id === $user->deliverer?->id;
 });

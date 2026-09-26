@@ -20,19 +20,32 @@
     |--------------------------------------------------------------------------
     | Colors
     |--------------------------------------------------------------------------
+    | Identité de marque LIV corp : orange vif (logo "LIV") + bleu (logo "corp"
+    | en script, boutons secondaires). Valeurs reprises du support de
+    | communication officiel (flyer "Ce que nous vous offrons").
     */
 
-    --color-primary: #2563eb;
+    --color-primary: #f5721e;
     --color-on-primary: #ffffff;
+    --color-primary-fixed: #fde8da;
+    --color-on-primary-fixed-variant: #9a3412;
+    --color-primary-container: #fde8da;
+    --color-on-primary-container: #9a3412;
 
-    --color-secondary: #64748b;
+    --color-secondary: #3871c2;
+    --color-on-secondary: #ffffff;
     --color-secondary-fixed: #e2e8f0;
     --color-on-secondary-fixed: #0f172a;
 
-    --color-tertiary: #7c3aed;
+    --color-tertiary: #3871c2;
+
+    --color-error: #dc2626;
+    --color-error-container: #fbe4e2;
+    --color-on-error-container: #7f1d1d;
 
     --color-surface: #f8fafc;
     --color-surface-container-lowest: #ffffff;
+    --color-surface-container-low: #f8fafc;
     --color-surface-container: #f1f5f9;
     --color-surface-container-high: #e2e8f0;
 
@@ -49,6 +62,53 @@
     */
 
     --shadow-card: 0 4px 12px rgba(0, 0, 0, 0.08);
+    --shadow-modal: 0 12px 32px rgba(15, 23, 42, 0.18);
+    /* Carte survolée : elle se soulève, avec une ombre teintée du bleu de la marque. */
+    --shadow-lift: 0 18px 34px -12px rgba(56, 113, 194, 0.38), 0 6px 12px rgba(15, 23, 42, 0.06);
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pied de page
+    |--------------------------------------------------------------------------
+    | Bleu marine dérivé du bleu du logo (#3871c2), assez sombre pour que
+    | l'orange de la marque et le "corp" éclairci ressortent.
+    */
+
+    --color-footer: #0f2a4a;
+    --color-footer-text: #cfdcef;
+    --color-footer-muted: #9db2cf;
+    --color-footer-accent: #7aa9ec;
+
+    /*
+    |--------------------------------------------------------------------------
+    | Animations (utilisées avec le préfixe motion-safe: dans le JSX)
+    |--------------------------------------------------------------------------
+    */
+
+    --animate-fade-up: fade-up 0.7s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    --animate-hero-zoom: hero-zoom 2.2s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+    --animate-float: float 5s ease-in-out infinite;
+    --animate-gradient-pan: gradient-pan 8s ease-in-out infinite;
+
+    @keyframes fade-up {
+        from { opacity: 0; transform: translateY(24px); }
+        to { opacity: 1; transform: none; }
+    }
+
+    @keyframes hero-zoom {
+        from { transform: scale(1.1); }
+        to { transform: none; }
+    }
+
+    @keyframes float {
+        0%, 100% { transform: translateY(0); }
+        50% { transform: translateY(-10px); }
+    }
+
+    @keyframes gradient-pan {
+        0%, 100% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+    }
 }
 
 /*
@@ -128,62 +188,148 @@
     |--------------------------------------------------------------------------
     | Bouton principal
     |--------------------------------------------------------------------------
+    | Au survol : il se soulève, fonce légèrement et un reflet le traverse.
+    | Au clic : il s'enfonce. Rien ne bouge quand il est désactivé.
     */
 
     .btn-primary {
-        @apply inline-flex items-center justify-center gap-2
+        @apply relative inline-flex items-center justify-center gap-2
+            overflow-hidden
             rounded-lg
             bg-primary
             px-5 py-3
             font-body
             text-sm font-semibold
             text-on-primary
-            transition
-            hover:opacity-90
-            active:opacity-80
             disabled:cursor-not-allowed
             disabled:opacity-50;
+
+        transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, background-color 0.2s ease, opacity 0.2s ease;
+    }
+
+    .btn-primary::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        pointer-events: none;
+        background: linear-gradient(105deg, transparent 30%, rgb(255 255 255 / 0.35) 50%, transparent 70%);
+        transform: translateX(-120%);
+        transition: transform 0.6s ease;
+    }
+
+    @media (hover: hover) {
+        .btn-primary:not(:disabled):hover {
+            transform: translateY(-2px);
+            background-color: color-mix(in srgb, var(--color-primary), black 8%);
+            box-shadow: 0 10px 22px -8px rgb(154 52 18 / 0.55);
+        }
+
+        .btn-primary:not(:disabled):hover::after {
+            transform: translateX(120%);
+        }
+    }
+
+    .btn-primary:not(:disabled):active {
+        transform: translateY(0) scale(0.97);
+        box-shadow: none;
     }
 
     /*
     |--------------------------------------------------------------------------
     | Bouton secondaire
     |--------------------------------------------------------------------------
+    | Au survol, le bleu le remplit de gauche à droite.
     */
 
     .btn-secondary {
-        @apply inline-flex items-center justify-center gap-2
+        @apply relative inline-flex items-center justify-center gap-2
             rounded-lg
             border border-secondary
-            bg-transparent
             px-5 py-3
             font-body
             text-sm font-semibold
             text-secondary
-            transition
-            hover:bg-secondary-fixed
             disabled:cursor-not-allowed
             disabled:opacity-50;
+
+        background: linear-gradient(var(--color-secondary), var(--color-secondary)) left / 0% 100% no-repeat;
+        transition: background-size 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), color 0.3s ease, transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, opacity 0.2s ease;
+    }
+
+    @media (hover: hover) {
+        .btn-secondary:not(:disabled):hover {
+            background-size: 100% 100%;
+            color: var(--color-on-secondary);
+            transform: translateY(-2px);
+            box-shadow: 0 10px 22px -10px rgb(56 113 194 / 0.75);
+        }
+    }
+
+    .btn-secondary:not(:disabled):active {
+        transform: translateY(0) scale(0.97);
+        box-shadow: none;
     }
 
     /*
     |--------------------------------------------------------------------------
     | Bouton / lien tertiaire
     |--------------------------------------------------------------------------
+    | Le soulignement se dessine de gauche à droite au survol.
     */
 
     .btn-tertiary {
         @apply inline-flex items-center gap-1
             text-sm font-semibold
-            text-tertiary
-            underline-offset-2
-            hover:underline;
+            text-tertiary;
+
+        background: linear-gradient(currentColor, currentColor) 0 100% / 0% 1.5px no-repeat;
+        transition: background-size 0.25s ease;
+    }
+
+    .btn-tertiary:hover {
+        background-size: 100% 1.5px;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Boutons sur fond orange (bandeau d'appel à l'action)
+    |--------------------------------------------------------------------------
+    */
+
+    .btn-light {
+        @apply inline-flex items-center justify-center gap-2
+            rounded-lg
+            bg-surface-container-lowest
+            px-5 py-3
+            text-sm font-semibold
+            text-primary
+            transition duration-200
+            hover:-translate-y-0.5
+            hover:shadow-modal
+            active:translate-y-0
+            active:scale-[0.97];
+    }
+
+    .btn-outline-light {
+        @apply inline-flex items-center justify-center gap-2
+            rounded-lg
+            border border-on-primary/40
+            px-5 py-3
+            text-sm font-semibold
+            text-on-primary
+            transition duration-200
+            hover:-translate-y-0.5
+            hover:border-on-primary
+            hover:bg-on-primary/15
+            active:translate-y-0
+            active:scale-[0.97];
     }
 
     /*
     |--------------------------------------------------------------------------
     | Carte
     |--------------------------------------------------------------------------
+    | .card-hover : la carte cliquable ou mise en avant se soulève au survol.
     */
 
     .card {
@@ -191,6 +337,21 @@
             bg-surface-container-lowest
             p-6
             shadow-card;
+    }
+
+    .card-hover {
+        transition: transform 0.3s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.3s ease;
+    }
+
+    @media (hover: hover) {
+        .card-hover:hover {
+            transform: translateY(-6px);
+            box-shadow: var(--shadow-lift);
+        }
+    }
+
+    .card-hover:active {
+        transform: translateY(-2px);
     }
 
     /*
@@ -335,4 +496,100 @@
     .no-scrollbar::-webkit-scrollbar {
         display: none;
     }
+}
+
+/* Repères A/B de la carte de commande (cf. RouteMap.jsx) : goutte aux couleurs de la marque. */
+.map-pin {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  border-radius: 50% 50% 50% 0;
+  transform: rotate(-45deg);
+  border: 2px solid #fff;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.map-pin > span {
+  transform: rotate(45deg);
+  color: #fff;
+  font-weight: 800;
+  font-size: 14px;
+}
+.map-pin-pickup { background: #f5721e; }
+.map-pin-dropoff { background: #3871c2; }
+
+
+/* Fiche détaillée d'une annonce (cf. Sheet.jsx) : monte du bas sur téléphone, apparaît en fondu sur ordinateur. */
+@keyframes sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
+@keyframes sheet-fade { from { opacity: 0; } to { opacity: 1; } }
+.sheet-overlay { animation: sheet-fade 0.18s ease-out; }
+.sheet-panel { animation: sheet-up 0.24s cubic-bezier(0.2, 0.8, 0.2, 1); }
+@media (min-width: 640px) { .sheet-panel { animation: sheet-fade 0.18s ease-out; } }
+@media (prefers-reduced-motion: reduce) { .sheet-overlay, .sheet-panel { animation: none; } }
+
+
+/* Repère du livreur sur la carte de suivi : pastille bleue à l'initiale, qui pulse tant que la position est fraîche. */
+.deliverer-dot {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  background: #3871c2;
+  border: 3px solid #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 14px;
+  box-shadow: 0 2px 6px rgb(0 0 0 / 0.35);
+  animation: dot-pulse 2s ease-out infinite;
+}
+.deliverer-dot.is-stale { background: #94a3b8; animation: none; }
+@keyframes dot-pulse {
+  0% { box-shadow: 0 2px 6px rgb(0 0 0 / 0.35), 0 0 0 0 rgb(56 113 194 / 0.55); }
+  70% { box-shadow: 0 2px 6px rgb(0 0 0 / 0.35), 0 0 0 16px rgb(56 113 194 / 0); }
+  100% { box-shadow: 0 2px 6px rgb(0 0 0 / 0.35), 0 0 0 0 rgb(56 113 194 / 0); }
+}
+@media (prefers-reduced-motion: reduce) { .deliverer-dot { animation: none; } }
+
+
+/* Apparition au défilement (cf. Reveal.jsx) : l'élément glisse et se fond quand il entre à l'écran. */
+.reveal {
+  opacity: 0;
+  transform: translateY(28px);
+  transition: opacity 0.7s cubic-bezier(0.2, 0.8, 0.2, 1), transform 0.7s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.reveal-left { transform: translateX(-32px); }
+.reveal-scale { transform: scale(0.94); }
+.reveal.is-visible {
+  opacity: 1;
+  transform: none;
+  transition-delay: var(--reveal-delay, 0ms);
+}
+
+/* Barre de progression de l'étape en cours dans "Comment ça marche" (la durée est réglée en ligne). */
+.step-progress {
+  transform-origin: left;
+  animation: step-progress linear forwards;
+}
+@keyframes step-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* Réglage système "réduire les animations" : tout reste lisible, rien ne bouge (les changements d'état,
+   comme la couleur au survol, restent, mais sans transition ni déplacement). */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    transition-delay: 0ms !important;
+    scroll-behavior: auto !important;
+  }
+  .reveal { opacity: 1; transform: none; }
+  .btn-primary:not(:disabled):hover, .btn-primary:not(:disabled):active,
+  .btn-secondary:not(:disabled):hover, .btn-secondary:not(:disabled):active,
+  .card-hover:hover, .card-hover:active { transform: none !important; }
+  .btn-light, .btn-outline-light { translate: none !important; scale: none !important; }
+  .btn-primary::after { display: none; }
 }

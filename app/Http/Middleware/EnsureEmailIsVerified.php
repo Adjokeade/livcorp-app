@@ -16,6 +16,10 @@ class EnsureEmailIsVerified
     {
         $user = $request->user();
 
+        if (! config('app.email_verification_required') && $user) {
+            return $next($request);
+        }
+
         if (! $user || is_null($user->email_verified_at)) {
             return response()->json([
                 'message' => 'Veuillez vérifier votre adresse e-mail avant de continuer.',

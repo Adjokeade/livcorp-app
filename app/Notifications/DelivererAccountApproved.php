@@ -3,6 +3,7 @@
 namespace App\Notifications;
 
 use App\Models\Deliverer;
+use App\Notifications\Channels\WebPushChannel;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Notifications\Messages\MailMessage;
@@ -21,7 +22,17 @@ class DelivererAccountApproved extends Notification implements ShouldQueue
 
     public function via($notifiable): array
     {
-        return ['mail'];
+        return ['mail', WebPushChannel::class];
+    }
+
+    public function toWebPush($notifiable): array
+    {
+        return [
+            'title' => 'Compte livreur activé !',
+            'body' => 'Votre dossier est validé : passez en disponible pour recevoir des courses.',
+            'url' => config('app.frontend_url').'/deliverer/tableau-de-bord',
+            'tag' => 'deliverer-account',
+        ];
     }
 
     public function toMail($notifiable): MailMessage
@@ -31,7 +42,7 @@ class DelivererAccountApproved extends Notification implements ShouldQueue
             ->greeting("Bienvenue chez LIV corp, {$notifiable->first_name} !")
             ->line('Bonne nouvelle : votre compte livreur vient d\'être validé par notre équipe.')
             ->line('Vous pouvez dès maintenant vous connecter, passer en disponible et commencer à accepter des courses.')
-            ->action('Ouvrir mon tableau de bord', config('app.frontend_url').'/livreur/tableau-de-bord')
+            ->action('Ouvrir mon tableau de bord', config('app.frontend_url').'/deliverer/tableau-de-bord')
             ->line('Merci de faire partie de l\'aventure LIV corp !');
     }
 }

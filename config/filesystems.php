@@ -38,6 +38,23 @@ return [
             'report' => false,
         ],
 
+        // Pièces justificatives des livreurs : jamais servies publiquement,
+        // seulement lues côté serveur pour l'administrateur.
+        'documents_private' => [
+            'driver' => 'local',
+            'root' => storage_path('app/private/documents'),
+            'throw' => false,
+            'report' => false,
+        ],
+
+        // Photos de colis : jamais servies directement, seulement via une URL signée.
+        'parcel_photos' => [
+            'driver' => 'local',
+            'root' => storage_path('app/private/parcels'),
+            'throw' => false,
+            'report' => false,
+        ],
+
         'public' => [
             'driver' => 'local',
             'root' => storage_path('app/public'),

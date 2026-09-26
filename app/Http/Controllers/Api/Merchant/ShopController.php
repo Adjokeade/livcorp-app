@@ -23,7 +23,9 @@ class ShopController extends Controller
 
     public function update(UpdateShopRequest $request)
     {
-        $merchant = $request->user()->merchant()->firstOrCreate([]);
+        // shop_name/shop_address sont NOT NULL : il faut les fournir dès la
+        // création, pas seulement dans un update() séparé qui suivrait.
+        $merchant = $request->user()->merchant()->firstOrCreate([], $request->validated());
         $merchant->update($request->validated());
 
         // Toute modification substantielle repasse la boutique en attente de validation

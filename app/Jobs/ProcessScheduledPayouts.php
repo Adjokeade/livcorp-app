@@ -41,15 +41,30 @@ class ProcessScheduledPayouts implements ShouldQueue
                 continue;
             }
 
+            // Les commissions sur paiements en espèces sont négatives : elles s'imputent
+            // sur les gains en ligne. Si le solde est nul ou négatif, rien n'est versé et
+            // les écritures restent "due" pour être compensées par les prochaines courses.
             $totalAmount = $commissions->sum('net_amount');
 
+            if ($totalAmount <= 0) {
+                continue;
+            }
+
             DB::transaction(function () use ($commissions, $beneficiary, $mobileMoneyNumber, $totalAmount, $fedapay, $auditLog) {
+                // La config utilise daily|weekly|monthly, la colonne un enum en français.
+                $frequency = config('services.commission.payout_frequency', 'weekly');
+                [$periodType, $periodStart] = match ($frequency) {
+                    'daily' => ['journalier', now()->startOfDay()],
+                    'monthly' => ['mensuel', now()->startOfMonth()],
+                    default => ['hebdomadaire', now()->startOfWeek()],
+                };
+
                 $payout = Payout::create([
                     'beneficiary_id' => $beneficiary->id,
                     'beneficiary_type' => $commissions->first()->beneficiary_type,
                     'total_amount' => $totalAmount,
-                    'period_type' => config('services.commission.payout_frequency', 'weekly'),
-                    'period_start' => now()->startOfWeek(),
+                    'period_type' => $periodType,
+                    'period_start' => $periodStart,
                     'period_end' => now(),
                     'status' => 'processing',
                     'mobile_money_number' => $mobileMoneyNumber,
@@ -74,10 +89,14 @@ class ProcessScheduledPayouts implements ShouldQueue
                         'paid_at' => now(),
                     ]);
                     $commissions->toQuery()->update(['status' => 'paid']);
+                    $beneficiary->deliverer?->refreshStats();
 
                     $auditLog->log('payout.processed', $payout, ['amount' => $totalAmount]);
                 } catch (\Throwable $e) {
                     $payout->update(['status' => 'failed']);
+                    // Les gains reviennent dans la file : ils seront retentés au prochain passage
+                    // au lieu de rester bloqués dans un versement échoué.
+                    Commission::where('payout_id', $payout->id)->update(['status' => 'due', 'payout_id' => null]);
                     Log::error("Échec du payout #{$payout->id}: {$e->getMessage()}");
                 }
             });
