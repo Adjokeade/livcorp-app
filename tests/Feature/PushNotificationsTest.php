@@ -13,7 +13,6 @@ use App\Notifications\DelivererAccountRejected;
 use App\Notifications\DelivererDocumentsReceived;
 use App\Notifications\NewOrderAvailable;
 use App\Notifications\OrderStatusUpdatedForClient;
-use App\Notifications\PaymentValidatedForDeliverer;
 use App\Services\OrderStatusService;
 use App\Services\PushService;
 use App\Services\WebPushTransport;
@@ -195,11 +194,11 @@ class PushNotificationsTest extends TestCase
         return [$client, $this->makeOrder($client, null, Order::STATUS_CREEE, 3000, 'en_ligne', $overrides)];
     }
 
-    public function test_a_new_order_alerts_only_available_deliverers_nearby_with_a_subscribed_device(): void
+    public function test_a_paid_delivery_alerts_only_available_deliverers_nearby_with_a_subscribed_device(): void
     {
         Notification::fake();
         Storage::fake('parcel_photos');
-        Http::fake(['*' => Http::response(['code' => 'Ok', 'routes' => [['distance' => 9000, 'duration' => 600, 'geometry' => ['coordinates' => [[2.41, 6.36], [2.36, 6.35]]]]]])]);
+        $this->configureKkiapay();
 
         $near = $this->makeDeliverer();      $near->update(['is_available' => true, 'current_lat' => 6.37, 'current_lng' => 2.40]);
         $far = $this->makeDeliverer();       $far->update(['is_available' => true, 'current_lat' => 9.34, 'current_lng' => 2.63]); // Parakou
@@ -210,30 +209,27 @@ class PushNotificationsTest extends TestCase
             $this->subscribe($d->user);
         }
 
-        $this->actingAs($this->makeUser('client'), 'sanctum')->postJson('/api/v1/client/orders', [
+        Http::fake(['*' => Http::response(['code' => 'Ok', 'routes' => [['distance' => 9000, 'duration' => 600, 'geometry' => ['coordinates' => [[2.41, 6.36], [2.36, 6.35]]]]]])]);
+        $client = $this->makeUser('client');
+        $created = $this->actingAs($client, 'sanctum')->post('/api/v1/client/orders', [
             'type' => 'colis', 'pickup_address' => 'Dantokpa', 'pickup_lat' => 6.3654, 'pickup_lng' => 2.4183,
             'dropoff_address' => 'Fidjrossè', 'dropoff_lat' => 6.3520, 'dropoff_lng' => 2.3620,
-            'recipient_name' => 'Koffi', 'recipient_phone' => '+22901000000', 'price' => 1800,
+            'recipient_name' => 'Koffi', 'recipient_phone' => '+22901000000',
             'photo' => UploadedFile::fake()->image('c.jpg'),
-        ])->assertCreated();
+        ], ['Accept' => 'application/json'])->assertCreated();
+
+        // Créée mais pas payée : personne n'est prévenu.
+        Notification::assertNothingSent();
+
+        Http::swap(new \Illuminate\Http\Client\Factory);
+        Http::fake(['*' => Http::response(['status' => 'SUCCESS', 'amount' => (int) $created->json('payment.amount'), 'partnerId' => $created->json('payment.reference'), 'source' => 'MOBILE_MONEY'])]);
+        $this->postJson('/api/v1/client/payments/confirm', ['reference' => $created->json('payment.reference'), 'transaction_id' => 'TXN1'])->assertOk();
 
         Notification::assertSentTo($near->user, NewOrderAvailable::class);
         Notification::assertSentTo($unlocated->user, NewOrderAvailable::class); // position inconnue : prévenu quand même
         Notification::assertNotSentTo($far->user, NewOrderAvailable::class);
         Notification::assertNotSentTo($offline->user, NewOrderAvailable::class);
         Notification::assertNotSentTo($noDevice->user, NewOrderAvailable::class);
-    }
-
-    public function test_the_deliverer_is_alerted_when_the_client_validates_the_payment(): void
-    {
-        Notification::fake();
-        $client = $this->makeUser('client');
-        $deliverer = $this->makeDeliverer();
-        $order = $this->makeOrder($client, $deliverer, Order::STATUS_EN_COURS_LIVRAISON, 3000, 'en_ligne', ['payment_status' => 'en_attente', 'payment_method' => null]);
-
-        $this->actingAs($client, 'sanctum')->postJson("/api/v1/client/orders/{$order->id}/payment", ['method' => 'especes'])->assertOk();
-
-        Notification::assertSentTo($deliverer->user, PaymentValidatedForDeliverer::class);
     }
 
     public function test_every_order_status_change_also_alerts_the_client_by_push(): void
@@ -292,6 +288,6 @@ class PushNotificationsTest extends TestCase
 
         $status = (new OrderStatusUpdatedForClient($order->forceFill(['status' => 'en_cours_livraison'])))->toWebPush(new User);
         $this->assertStringEndsWith('/client/suivi/42', $status['url']);
-        $this->assertStringContainsString('validez le paiement', $status['body']);
+        $this->assertStringContainsString('en route', $status['body']);
     }
 }

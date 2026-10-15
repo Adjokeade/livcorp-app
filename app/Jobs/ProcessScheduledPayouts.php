@@ -5,7 +5,6 @@ namespace App\Jobs;
 use App\Models\Commission;
 use App\Models\Payout;
 use App\Services\AuditLogService;
-use App\Services\FedaPayService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -15,43 +14,45 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Regroupe les commissions "due" par bénéficiaire et déclenche les reversements
- * Mobile Money via FedaPay. Exécuté par le scheduler (routes/console.php).
- * Cf. cahier des charges §3.4 : "Calcul automatique des commissions et gestion
- * des versements (périodicité journalière ou mensuelle)".
+ * Prépare les versements aux livreurs : regroupe leurs commissions « due » en un versement EN ATTENTE par livreur.
+ * Exécuté chaque soir par le scheduler (routes/console.php) ou à la demande de l'administration.
+ *
+ * KKiaPay n'a pas d'API pour payer des tiers : ce job ne verse rien. L'administration paie chaque versement en Mobile
+ * Money au numéro du livreur, puis le marque comme versé (cf. FinanceController::payPayout).
+ *
+ * Les commissions sur paiements en espèces sont négatives : elles s'imputent sur les gains en ligne. Si le solde est
+ * nul ou négatif, rien n'est préparé et les écritures restent « due » pour être compensées par les prochaines courses.
  */
 class ProcessScheduledPayouts implements ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
-    public function handle(FedaPayService $fedapay, AuditLogService $auditLog): void
+    public function handle(AuditLogService $auditLog): void
     {
-        $dueCommissions = Commission::where('status', 'due')
+        $due = Commission::where('status', 'due')
             ->with('beneficiary.deliverer', 'beneficiary.merchant')
             ->get()
             ->groupBy('beneficiary_id');
 
-        foreach ($dueCommissions as $beneficiaryId => $commissions) {
+        foreach ($due as $beneficiaryId => $commissions) {
             $beneficiary = $commissions->first()->beneficiary;
-            $mobileMoneyNumber = $beneficiary->deliverer->mobile_money_number
-                ?? null;
+            $mobileMoneyNumber = $beneficiary->deliverer->mobile_money_number ?? null;
 
             if (! $mobileMoneyNumber) {
-                Log::warning("Payout ignoré : aucun numéro Mobile Money pour l'utilisateur #{$beneficiaryId}");
+                Log::warning("Versement ignoré : aucun numéro Mobile Money pour l'utilisateur #{$beneficiaryId}");
                 continue;
             }
 
-            // Les commissions sur paiements en espèces sont négatives : elles s'imputent
-            // sur les gains en ligne. Si le solde est nul ou négatif, rien n'est versé et
-            // les écritures restent "due" pour être compensées par les prochaines courses.
-            $totalAmount = $commissions->sum('net_amount');
+            DB::transaction(function () use ($commissions, $beneficiary, $mobileMoneyNumber, $auditLog) {
+                // Un versement déjà en attente pour ce livreur s'enrichit des nouvelles écritures plutôt que d'en créer un autre.
+                $payout = Payout::where('beneficiary_id', $beneficiary->id)->where('status', 'pending')->lockForUpdate()->first();
+                $included = $payout ? Commission::where('payout_id', $payout->id)->sum('net_amount') : 0;
+                $total = $included + $commissions->sum('net_amount');
 
-            if ($totalAmount <= 0) {
-                continue;
-            }
+                if ($total <= 0) {
+                    return;
+                }
 
-            DB::transaction(function () use ($commissions, $beneficiary, $mobileMoneyNumber, $totalAmount, $fedapay, $auditLog) {
-                // La config utilise daily|weekly|monthly, la colonne un enum en français.
                 $frequency = config('services.commission.payout_frequency', 'weekly');
                 [$periodType, $periodStart] = match ($frequency) {
                     'daily' => ['journalier', now()->startOfDay()],
@@ -59,46 +60,18 @@ class ProcessScheduledPayouts implements ShouldQueue
                     default => ['hebdomadaire', now()->startOfWeek()],
                 };
 
-                $payout = Payout::create([
+                $payout ??= new Payout([
                     'beneficiary_id' => $beneficiary->id,
                     'beneficiary_type' => $commissions->first()->beneficiary_type,
-                    'total_amount' => $totalAmount,
                     'period_type' => $periodType,
                     'period_start' => $periodStart,
-                    'period_end' => now(),
-                    'status' => 'processing',
-                    'mobile_money_number' => $mobileMoneyNumber,
+                    'status' => 'pending',
                 ]);
+                $payout->fill(['total_amount' => $total, 'period_end' => now(), 'mobile_money_number' => $mobileMoneyNumber])->save();
 
-                $commissions->toQuery()->update([
-                    'status' => 'included_in_payout',
-                    'payout_id' => $payout->id,
-                ]);
+                $commissions->toQuery()->update(['status' => 'included_in_payout', 'payout_id' => $payout->id]);
 
-                try {
-                    $result = $fedapay->createPayout(
-                        $mobileMoneyNumber,
-                        $totalAmount,
-                        "Versement LIV corp — {$payout->period_start->format('d/m/Y')} au {$payout->period_end->format('d/m/Y')}"
-                    );
-
-                    $payout->update([
-                        'status' => 'paid',
-                        'fedapay_payout_id' => $result['id'] ?? null,
-                        'fedapay_payload' => $result,
-                        'paid_at' => now(),
-                    ]);
-                    $commissions->toQuery()->update(['status' => 'paid']);
-                    $beneficiary->deliverer?->refreshStats();
-
-                    $auditLog->log('payout.processed', $payout, ['amount' => $totalAmount]);
-                } catch (\Throwable $e) {
-                    $payout->update(['status' => 'failed']);
-                    // Les gains reviennent dans la file : ils seront retentés au prochain passage
-                    // au lieu de rester bloqués dans un versement échoué.
-                    Commission::where('payout_id', $payout->id)->update(['status' => 'due', 'payout_id' => null]);
-                    Log::error("Échec du payout #{$payout->id}: {$e->getMessage()}");
-                }
+                $auditLog->log('payout.prepared', $payout, ['amount' => $total]);
             });
         }
     }

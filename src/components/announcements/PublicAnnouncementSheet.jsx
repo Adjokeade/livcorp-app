@@ -30,7 +30,7 @@ export default function PublicAnnouncementSheet({ open, order, viewer, onClose }
     ['Urgence', order.urgency === 'express' ? 'Express (prioritaire)' : 'Standard'],
     ['Description', order.package_type],
     ['Publiée', timeAgo(order.created_at)],
-    ['Paiement', 'À la réception du colis, devant le livreur'],
+    ['Paiement', order.payment_method === 'especes' ? 'En espèces, remis au livreur au retrait du colis' : 'Payé d\'avance par le client, versé au livreur après confirmation de réception'],
   ].filter(([, value]) => value);
 
   const role = viewer?.role;

@@ -32,7 +32,8 @@ class OrderStatusUpdatedForClient extends Notification implements ShouldQueue
         return match ($this->order->status) {
             'acceptee' => "{$delivererName} a accepté votre commande et se prépare à venir récupérer votre colis.",
             'colis_recupere' => "{$delivererName} vient de récupérer votre colis, direction la livraison !",
-            'en_cours_livraison' => "{$delivererName} est en route vers vous. À la remise du colis, validez le paiement dans l'application.",
+            'en_cours_livraison' => "{$delivererName} est en route pour livrer votre colis.",
+            'remise' => "{$delivererName} a remis le colis. Regardez la photo de réception et confirmez dans l'application.",
             'livree' => 'Votre commande a été livrée avec succès. Merci de votre confiance ! Un avis sur votre livreur ?',
             'annulee' => 'Votre commande a bien été annulée.',
             'creee' => "Votre livreur ne peut plus assurer la course : nous la proposons à d'autres livreurs.",

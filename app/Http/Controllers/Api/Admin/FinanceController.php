@@ -5,8 +5,11 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Jobs\ProcessScheduledPayouts;
 use App\Models\Commission;
+use App\Models\Order;
 use App\Models\Payout;
+use App\Models\Transaction;
 use App\Models\User;
+use App\Notifications\PayoutSent;
 use App\Services\AuditLogService;
 use App\Services\FinanceSettings;
 use Illuminate\Http\Request;
@@ -57,6 +60,9 @@ class FinanceController extends Controller
             'owed_to_deliverers' => (float) $online($open())->sum('net_amount'),
             'owed_by_deliverers' => abs((float) $cash($open())->where('net_amount', '<', 0)->sum('net_amount')),
             'failed_payouts' => Payout::where('status', 'failed')->count(),
+            'refunds_to_do' => Transaction::where('refund_status', 'manual')->count(),
+            // Argent encaissé et gardé chez LIV corp : livraisons payées dont la réception n'est pas encore confirmée.
+            'held_amount' => (float) Order::where('payment_status', 'paye')->whereNotIn('status', [Order::STATUS_LIVREE, Order::STATUS_ANNULEE])->sum('price'),
             'processing_payouts' => Payout::whereIn('status', ['pending', 'processing'])->count(),
             'by_day' => $byDay,
             'top_balances' => $this->balances(),
@@ -134,18 +140,92 @@ class FinanceController extends Controller
                 'period_start' => $p->period_start,
                 'period_end' => $p->period_end,
                 'mobile_money_number' => $p->mobile_money_number,
+                'reference' => $p->reference,
                 'paid_at' => $p->paid_at,
                 'created_at' => $p->created_at,
             ]);
     }
 
-    /** Lance tout de suite le traitement des versements dus (d'ordinaire planifié chaque jour à 20 h). */
+    /**
+     * L'administration a payé le versement en Mobile Money (hors application, KKiaPay ne verse pas à des tiers) : on le
+     * marque comme versé, ses commissions sont réglées et le livreur est prévenu. `reference` = référence de l'opérateur.
+     */
+    public function payPayout(Request $request, Payout $payout)
+    {
+        $validated = $request->validate(['reference' => 'nullable|string|max:100']);
+
+        if ($payout->status !== 'pending') {
+            return response()->json(['message' => 'Ce versement n\'est pas en attente.'], 422);
+        }
+
+        DB::transaction(function () use ($payout, $validated, $request) {
+            $payout->update([
+                'status' => 'paid',
+                'paid_at' => now(),
+                'paid_by' => $request->user()->id,
+                'reference' => $validated['reference'] ?? null,
+            ]);
+            Commission::where('payout_id', $payout->id)->update(['status' => 'paid']);
+        });
+
+        $payout->beneficiary?->deliverer?->refreshStats();
+        $this->auditLog->log('payout.paid', $payout, ['amount' => $payout->total_amount, 'reference' => $validated['reference'] ?? null]);
+        rescue(fn () => $payout->beneficiary?->notify(new PayoutSent($payout)));
+
+        return ['id' => $payout->id, 'status' => 'paid'];
+    }
+
+    /** Annule un versement en attente : ses commissions reviennent « à verser » et seront regroupées au prochain passage. */
+    public function cancelPayout(Request $request, Payout $payout)
+    {
+        if ($payout->status !== 'pending') {
+            return response()->json(['message' => 'Ce versement n\'est pas en attente.'], 422);
+        }
+
+        DB::transaction(function () use ($payout) {
+            Commission::where('payout_id', $payout->id)->update(['status' => 'due', 'payout_id' => null]);
+            $payout->update(['status' => 'failed']);
+        });
+
+        $this->auditLog->log('payout.cancelled', $payout);
+
+        return ['id' => $payout->id, 'status' => 'failed'];
+    }
+
+    /** Remboursements de clients à faire à la main (carte, envoi en lot, remboursement partiel, panne de l'API). */
+    public function refunds()
+    {
+        return Transaction::where('refund_status', 'manual')->with(['user:id,first_name,last_name,company_name'])->latest()->get()
+            ->map(fn (Transaction $t) => [
+                'id' => $t->id,
+                'reference' => $t->reference,
+                'amount' => (float) $t->amount,
+                'orders' => Order::where('transaction_id', $t->id)->pluck('reference'),
+                'client' => $t->user ? ($t->user->company_name ?: trim($t->user->first_name.' '.$t->user->last_name)) : '—',
+                'note' => $t->refund_note,
+                'method' => $t->method,
+                'provider_transaction_id' => $t->provider_transaction_id,
+                'created_at' => $t->created_at,
+            ]);
+    }
+
+    public function refundDone(Transaction $transaction)
+    {
+        abort_unless($transaction->refund_status === 'manual', 422, 'Aucun remboursement à faire sur cette transaction.');
+
+        $transaction->update(['refund_status' => 'done']);
+        $this->auditLog->log('payment.refund_done_manually', $transaction);
+
+        return ['id' => $transaction->id, 'refund_status' => 'done'];
+    }
+
+    /** Prépare tout de suite les versements dus (d'ordinaire planifié chaque jour à 20 h). */
     public function runPayouts(Request $request)
     {
         $this->auditLog->log('admin.payouts.run');
         ProcessScheduledPayouts::dispatch();
 
-        return response()->json(['message' => 'Traitement des versements lancé. Les résultats apparaissent dans quelques instants.'], 202);
+        return response()->json(['message' => 'Préparation des versements lancée : ils apparaissent « en attente » dans quelques instants, prêts à être payés en Mobile Money.'], 202);
     }
 
     public function settings()

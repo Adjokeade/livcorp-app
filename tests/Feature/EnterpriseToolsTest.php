@@ -16,6 +16,12 @@ class EnterpriseToolsTest extends TestCase
     use BuildsPlatformData;
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->configureKkiapay(); // sans clés KKiaPay, une livraison ne peut pas être créée (elle se paie à la création)
+    }
+
     private function entreprise()
     {
         $user = $this->makeUser('client');

@@ -13,7 +13,7 @@ class Payout extends Model
 
     protected $fillable = [
         'beneficiary_id', 'beneficiary_type', 'total_amount', 'period_type', 'period_start', 'period_end',
-        'status', 'mobile_money_number', 'fedapay_payout_id', 'fedapay_payload', 'paid_at',
+        'status', 'mobile_money_number', 'reference', 'provider_payload', 'paid_at', 'paid_by',
     ];
 
     protected function casts(): array
@@ -22,7 +22,7 @@ class Payout extends Model
             'total_amount' => 'decimal:2',
             'period_start' => 'date',
             'period_end' => 'date',
-            'fedapay_payload' => 'array',
+            'provider_payload' => 'array',
             'paid_at' => 'datetime',
         ];
     }

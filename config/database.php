@@ -58,7 +58,11 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
-            'engine' => null,
+            // InnoDB explicitement : sur certaines installations (WAMP/XAMPP anciens) le moteur par défaut est MyISAM, dont les index
+            // sont limités à 1000 octets (erreur 1071 « La clé est trop longue »).
+            'engine' => env('DB_ENGINE', 'InnoDB'),
+            // À mettre à true (DB_LEGACY_MYSQL=true) avec un très vieux MySQL/MariaDB (< 5.7.7 / < 10.2.2) : colonnes texte limitées à 191 caractères.
+            'legacy' => (bool) env('DB_LEGACY_MYSQL', false),
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
@@ -78,7 +82,11 @@ return [
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
-            'engine' => null,
+            // InnoDB explicitement : sur certaines installations (WAMP/XAMPP anciens) le moteur par défaut est MyISAM, dont les index
+            // sont limités à 1000 octets (erreur 1071 « La clé est trop longue »).
+            'engine' => env('DB_ENGINE', 'InnoDB'),
+            // À mettre à true (DB_LEGACY_MYSQL=true) avec un très vieux MySQL/MariaDB (< 5.7.7 / < 10.2.2) : colonnes texte limitées à 191 caractères.
+            'legacy' => (bool) env('DB_LEGACY_MYSQL', false),
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 Mysql::ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],

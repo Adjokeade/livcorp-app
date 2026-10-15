@@ -31,6 +31,8 @@ class StoreOrderRequest extends FormRequest
             'urgency' => 'nullable|in:standard,express',
             // Proposer la livraison d'abord aux livreurs favoris (réservée à eux pendant quelques minutes).
             'favorites_first' => 'nullable|boolean',
+            // En ligne (payé tout de suite, argent bloqué) ou en espèces (remis au livreur quand il récupère le colis).
+            'payment_method' => 'nullable|in:en_ligne,especes',
             // Pas de prix ici : il est imposé par LIV corp selon la distance (cf. GeolocationService::priceFor).
             // Un colis se montre : la photo est obligatoire. Pour une course (achats à faire), elle est facultative.
             'photo' => 'required_if:type,colis|nullable|image|mimes:jpg,jpeg,png,webp|max:8192',

@@ -21,7 +21,8 @@ class AdminFinanceTest extends TestCase
     {
         $order = $this->makeOrder($this->makeUser('client'), $deliverer, Order::STATUS_LIVREE, $amount, $method);
         $commission = app(CommissionService::class)->computeForDeliveredOrder($order);
-        $commission->update(['status' => $status]);
+        // Les paiements en espèces n'existent plus : ces écritures négatives sont d'anciennes données, que les finances savent encore lire.
+        $commission->update(['status' => $status] + ($method === 'especes' ? ['net_amount' => -$commission->commission_amount] : []));
 
         return $commission;
     }

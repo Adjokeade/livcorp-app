@@ -54,9 +54,27 @@ trait BuildsPlatformData
             'dropoff_address' => 'B', 'dropoff_lat' => 6.40, 'dropoff_lng' => 2.42,
             'price' => $price,
             'status' => $status,
-            // Le paiement se valide à la réception : toute course livrée l'est déjà.
-            'payment_status' => in_array($status, [Order::STATUS_EN_COURS_LIVRAISON, Order::STATUS_LIVREE], true) ? 'paye' : 'en_attente',
-            'payment_method' => in_array($status, [Order::STATUS_EN_COURS_LIVRAISON, Order::STATUS_LIVREE], true) ? $method : null,
+            // Le paiement se fait à la création : une livraison publiée (ou plus avancée) est toujours payée.
+            'payment_status' => $status === Order::STATUS_ANNULEE ? 'en_attente' : 'paye',
+            'payment_method' => $status === Order::STATUS_ANNULEE ? null : $method,
         ]);
+    }
+
+    /** Mène une livraison jusqu'à « livrée » comme en vrai : photo de réception (remise), puis confirmation de l'expéditeur. */
+    protected function completeDelivery(Order $order): Order
+    {
+        $service = app(\App\Services\OrderStatusService::class);
+
+        if ($order->status === Order::STATUS_EN_COURS_LIVRAISON) {
+            $order = $service->transitionTo($order, Order::STATUS_REMISE);
+        }
+
+        return $service->transitionTo($order, Order::STATUS_LIVREE);
+    }
+
+    /** Clés KKiaPay de test : sans elles, le paiement en ligne (donc la création d'une livraison) est indisponible. */
+    protected function configureKkiapay(): void
+    {
+        config(['services.kkiapay' => ['sandbox' => true, 'public_key' => 'pk', 'private_key' => 'sk', 'secret' => 'ss', 'webhook_secret' => 'hash-secret']]);
     }
 }

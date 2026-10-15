@@ -7,6 +7,29 @@
 <a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
 </p>
 
+## LIV corp : installation après un clonage
+
+```sh
+composer install
+npm install
+cp .env.example .env          # sous Windows : copy .env.example .env
+php artisan key:generate
+```
+
+1. **Base de données** : créer une base MySQL vide `livcorp` (phpMyAdmin, ou `CREATE DATABASE livcorp CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`),
+   puis régler `DB_USERNAME` / `DB_PASSWORD` dans `.env` (XAMPP et WAMP : `root`, mot de passe vide). `php artisan migrate` propose aussi de
+   créer la base si elle n'existe pas. Sans MySQL, `DB_CONNECTION=sqlite` (créer le fichier vide `database/database.sqlite`) suffit pour tester.
+2. `php artisan migrate`, puis facultatif : `php artisan db:seed` (compte admin et démonstration), `php artisan db:seed --class=TestProfilesSeeder`
+   et `php artisan db:seed --class=TestOrdersSeeder` (profils et livraisons de test, mot de passe `ChangeMoi123!`).
+3. `npm run dev` : serveur, file d'attente, planificateur et interface.
+
+**Dépannage**
+- *« Connection refused » / « Aucune connexion n'a pu être établie »* : MySQL n'est pas démarré (XAMPP, Laragon, WAMP : bouton Start).
+- *« Base 'livcorp' inconnue »* : la base n'existe pas, voir l'étape 1.
+- *« La clé est trop longue. Longueur maximale : 1000 » (erreur 1071)* : moteur MyISAM ou MySQL ancien. Le moteur InnoDB est utilisé par défaut dans ce projet ;
+  mettre à jour le code (`git pull`) puis `php artisan migrate:fresh`. Avec un MySQL antérieur à 5.7, ajouter `DB_LEGACY_MYSQL=true` dans `.env`.
+- Les clés KKiaPay (paiement en ligne) ne sont pas partagées : sans elles, seul le paiement en espèces fonctionne.
+
 ## LIV corp : lancer le projet
 
 ```sh
@@ -37,7 +60,53 @@ php artisan mail:status               # silencieux ou actif, identifiants comple
 php artisan mail:test vous@exemple.com
 ```
 
-Les e-mails passent par la file d'attente : `queue:work` doit tourner. Penser aussi à `EMAIL_VERIFICATION_REQUIRED=true` une fois l'envoi actif.
+Les e-mails passent par la file d'attente : `queue:work` doit tourner. La vérification d'adresse e-mail est **désactivée pour le moment** (`EMAIL_VERIFICATION_REQUIRED=false`, comptes validés d'office) ; penser à passer `EMAIL_VERIFICATION_REQUIRED=true` une fois l'envoi actif.
+
+### Paiement d'avance et confirmation de réception
+
+Le destinataire d'un colis n'a pas forcément l'application : c'est donc **l'expéditeur** qui confirme la réception, et le paiement se
+fait **à la création** de la livraison, au choix : **en ligne** (argent bloqué chez LIV corp) ou **en espèces** (remis au livreur).
+
+**En espèces** : la livraison est publiée tout de suite, sans paiement en ligne. L'expéditeur remet le prix au livreur, en main propre,
+**au retrait du colis** ; le livreur doit confirmer l'encaissement (« J'ai encaissé X FCFA ») avant de pouvoir récupérer le colis, et
+l'expéditeur est notifié. Le livreur garde les espèces : à la confirmation de réception, seule sa **commission** (négative) est
+inscrite à son compte et déduite de ses prochains versements en ligne. Pas d'annulation en ligne une fois les espèces encaissées.
+
+1. **Création** : l'expéditeur crée la livraison et, en ligne, la **paie tout de suite** (KKiaPay : Mobile Money ou carte). Tant qu'elle n'est
+   pas payée, elle est invisible des livreurs ; non payée au bout de 30 minutes (`ORDER_UNPAID_EXPIRY_MINUTES`), elle est annulée.
+2. **Argent bloqué** : une fois payée, la livraison est publiée aux livreurs. L'argent reste sur le compte KKiaPay de LIV corp.
+3. **Remise** : le livreur envoie la **photo de réception** (obligatoire) → statut « remise ».
+4. **Confirmation** : l'expéditeur voit la photo et **confirme la réception**. L'argent bloqué devient un **solde pour le livreur**
+   (net de la commission). Sans réponse sous 24 h (`ORDER_AUTO_CONFIRM_HOURS`, 0 pour désactiver), la réception est confirmée
+   automatiquement. L'expéditeur peut aussi **signaler un problème** : litige, l'argent reste bloqué et l'administration tranche
+   (remboursement du client, ou paiement du livreur).
+5. **Annulation** avant la récupération du colis : le client est remboursé (Mobile Money par l'API, le reste à la main).
+
+Ces échéances sont traitées par le planificateur (`php artisan schedule:work`, lancé par `npm run dev` ; en production, un cron
+`* * * * * php artisan schedule:run`).
+
+### Paiement en ligne (KKiaPay)
+
+Le widget KKiaPay s'ouvre dans l'application avec la seule clé publique ; au retour, le **serveur** interroge KKiaPay (clés privée et
+secrète) et ne valide que si la transaction a réussi, pour le bon montant et la bonne référence. Un webhook sert de filet. Un seul
+paiement peut couvrir plusieurs livraisons (envoi en lot des entreprises).
+
+Configuration (`.env`, valeurs dans le tableau de bord KKiaPay > Développeurs > Clés API) :
+
+```
+KKIAPAY_SANDBOX=true          # false en production
+KKIAPAY_PUBLIC_KEY=  KKIAPAY_PRIVATE_KEY=  KKIAPAY_SECRET=
+KKIAPAY_WEBHOOK_SECRET=       # « secret hash » choisi à la création du webhook
+```
+
+- **Webhook** à créer dans le tableau de bord : `https://VOTRE-DOMAINE/api/v1/webhooks/kkiapay`, événements succès et échec de transaction.
+- **Tests** : mode sandbox, numéros MTN `61000000` / `97000000` (succès), `61000001` (erreur), `61000002` (fonds insuffisants).
+- **Sans clés**, le paiement en ligne est indisponible : aucune livraison ne peut être créée (elle se paie à la création).
+- **Versements aux livreurs** : KKiaPay n'offre pas d'API pour payer des tiers. Chaque soir (ou à la demande, Admin > Finances >
+  Versements), LIV corp prépare un versement « à payer » par livreur ; l'administration l'envoie en Mobile Money au numéro indiqué,
+  puis le marque « versé » (le livreur est prévenu).
+- **Remboursement** d'un litige : un paiement Mobile Money remboursé en totalité passe par l'API KKiaPay ; carte, envoi en lot et
+  remboursement partiel se règlent à la main (Admin > Finances > Remboursements).
 
 ### Application installable et notifications push
 
@@ -66,8 +135,7 @@ commande, dossiers livreurs à valider.
   Le téléphone du livreur n'est visible que pendant la course, celui du destinataire n'est plus montré au livreur après.
 - **Arrivée** : "Je suis arrivé" au retrait puis à la destination. Refusé au-delà de `ORDER_ARRIVAL_RADIUS_M` (500 m) quand une
   position récente existe. Le temps d'attente sur place est visible des deux côtés.
-- **Code de remise** : 4 chiffres par commande, montré au client seul. Le livreur le saisit pour clôturer la course (5 essais,
-  puis blocage de 15 minutes et client prévenu). Pour un paiement en espèces, une photo de remise est obligatoire.
+- **Remise** : photo de réception obligatoire du livreur, confirmée par l'expéditeur (cf. ci-dessus). Plus de code de remise.
 - **Désistement** avant le retrait : motif obligatoire, la commande repart en circulation au prix initial du client, le livreur
   qui s'est désisté ne peut plus la reprendre ni la proposer.
 - **Destinataire injoignable** : déclarable après 10 minutes sur place. La commande passe en litige et le client peut relancer la

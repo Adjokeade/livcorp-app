@@ -338,10 +338,12 @@ export function Disputes() {
     refresh();
   }, []);
 
-  async function handleResolve(id) {
+  async function handleResolve(id, resolution = 'sans_suite') {
+    if (resolution === 'remboursement_total' && !window.confirm('Rembourser le client en totalité ? Un paiement Mobile Money est remboursé tout de suite par KKiaPay (les frais ne le sont pas).')) return;
     setBusyId(id);
     try {
-      await adminService.resolveDispute(id, 'sans_suite', 'Traité depuis le back-office.');
+      const result = await adminService.resolveDispute(id, resolution, resolution === 'sans_suite' ? 'Traité depuis le back-office.' : 'Remboursement total décidé par l\'administration.');
+      if (result.refund && result.refund.status !== 'none') window.alert(result.refund.message);
       await refresh();
     } finally {
       setBusyId(null);
@@ -364,9 +366,14 @@ export function Disputes() {
               {dispute.status}
             </span>
             {dispute.status !== 'resolu' && (
-              <Button onClick={() => handleResolve(dispute.id)} disabled={busyId === dispute.id}>
-                {busyId === dispute.id ? '…' : 'Marquer résolu'}
-              </Button>
+              <>
+                <Button variant="secondary" onClick={() => handleResolve(dispute.id, 'remboursement_total')} disabled={busyId === dispute.id}>
+                  Rembourser le client
+                </Button>
+                <Button onClick={() => handleResolve(dispute.id)} disabled={busyId === dispute.id}>
+                  {busyId === dispute.id ? '…' : 'Marquer résolu'}
+                </Button>
+              </>
             )}
           </div>
         </Card>

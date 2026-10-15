@@ -2,11 +2,15 @@
 
 return [
 
-    'fedapay' => [
-        'env' => env('FEDAPAY_ENV', 'sandbox'),
-        'public_key' => env('FEDAPAY_PUBLIC_KEY'),
-        'secret_key' => env('FEDAPAY_SECRET_KEY'),
-        'webhook_secret' => env('FEDAPAY_WEBHOOK_SECRET'),
+    // KKiaPay (Mobile Money et carte). Les trois clés viennent de Développeurs > Clés API du tableau de bord KKiaPay ;
+    // `webhook_secret` est le « secret hash » saisi à la création du webhook. Les clés privée et secrète ne quittent
+    // JAMAIS le serveur : seule la clé publique est transmise au navigateur pour ouvrir le widget.
+    'kkiapay' => [
+        'sandbox' => (bool) env('KKIAPAY_SANDBOX', true),
+        'public_key' => env('KKIAPAY_PUBLIC_KEY'),
+        'private_key' => env('KKIAPAY_PRIVATE_KEY'),
+        'secret' => env('KKIAPAY_SECRET'),
+        'webhook_secret' => env('KKIAPAY_WEBHOOK_SECRET'),
     ],
 
     'maps' => [
@@ -43,6 +47,8 @@ return [
         'max_distance_km' => (int) env('ORDER_MAX_DISTANCE_KM', 100),
         'min_distance_km' => 0.1,
         'arrival_radius_m' => (int) env('ORDER_ARRIVAL_RADIUS_M', 500),          // "Je suis arrivé" accepté à moins de 500 m du point
+        'auto_confirm_hours' => (int) env('ORDER_AUTO_CONFIRM_HOURS', 24),        // réception confirmée d'office si l'expéditeur ne répond pas
+        'unpaid_expiry_minutes' => (int) env('ORDER_UNPAID_EXPIRY_MINUTES', 30),  // une livraison créée mais jamais payée est annulée
         'unreachable_wait_min' => (int) env('ORDER_UNREACHABLE_WAIT_MIN', 10),   // attente minimale avant "destinataire injoignable"
         'code_max_attempts' => 5,
         'code_lock_minutes' => 15,

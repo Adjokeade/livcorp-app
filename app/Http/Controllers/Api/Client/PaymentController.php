@@ -4,90 +4,78 @@ namespace App\Http\Controllers\Api\Client;
 
 use App\Http\Controllers\Controller;
 use App\Models\Order;
-use App\Notifications\PaymentValidatedForDeliverer;
-use App\Services\AuditLogService;
-use App\Services\FedaPayService;
+use App\Models\Transaction;
+use App\Services\KkiapayService;
+use App\Services\OnlinePaymentService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
- * Paiement à la réception du colis : le client le valide dans l'app, devant le
- * livreur, qui en voit aussitôt le statut (et ne peut clôturer la course avant).
- *  - "especes"  : le client confirme avoir remis la somme au livreur ;
- *  - "en_ligne" : transaction FedaPay (Mobile Money / carte), confirmée par webhook.
+ * Paiement des livraisons, à la CRÉATION. Le client règle en ligne (KKiaPay : Mobile Money ou carte) ; l'argent reste
+ * bloqué chez LIV corp jusqu'à la confirmation de réception, puis devient un solde pour le livreur. Plus de paiement
+ * à la remise ni en espèces : le destinataire n'a pas besoin d'avoir l'application.
  */
 class PaymentController extends Controller
 {
     public function __construct(
-        private readonly FedaPayService $fedapay,
-        private readonly AuditLogService $auditLog,
+        private readonly KkiapayService $kkiapay,
+        private readonly OnlinePaymentService $payments,
     ) {}
 
+    /** Reprise du paiement d'une livraison créée mais pas encore payée (widget fermé, paiement échoué…). */
     public function store(Request $request, Order $order)
     {
-        $this->authorize('view', $order); // le client ne paie que SES commandes
+        $this->authorize('view', $order); // le client ne paie que SES livraisons
 
-        $validated = $request->validate(['method' => 'required|in:especes,en_ligne']);
+        if ($order->status !== Order::STATUS_CREEE) {
+            return response()->json(['message' => 'Cette livraison n\'est plus en attente de paiement.'], 422);
+        }
 
         if ($order->isPaid()) {
-            return response()->json(['message' => 'Cette commande est déjà payée.'], 409);
+            return response()->json(['message' => 'Cette livraison est déjà payée.'], 409);
         }
 
-        if ($order->status !== Order::STATUS_EN_COURS_LIVRAISON) {
-            return response()->json([
-                'message' => 'Le paiement se valide à la réception du colis, quand votre livreur est en route vers vous.',
-            ], 422);
+        if ($order->isCash()) {
+            return response()->json(['message' => 'Cette livraison se paie en espèces au livreur, à la récupération du colis.'], 422);
         }
 
-        return $validated['method'] === 'especes'
-            ? $this->payInCash($order)
-            : $this->startOnlinePayment($order);
+        if (! $this->kkiapay->isConfigured()) {
+            return response()->json(['message' => 'Le paiement en ligne est momentanément indisponible. Réessayez dans quelques instants.'], 502);
+        }
+
+        $transaction = $this->payments->resume($order);
+        $order->update(['payment_status' => 'en_attente']);
+
+        return response()->json(['order' => $order->fresh(), 'payment' => $this->payments->widgetPayload($transaction, $request->user())]);
     }
 
-    private function payInCash(Order $order)
+    /**
+     * Retour du widget KKiaPay : le navigateur donne l'identifiant de la transaction, le serveur la vérifie auprès de
+     * KKiaPay (existence, réussite, montant, référence) avant de marquer les livraisons payées et de les publier.
+     */
+    public function confirm(Request $request)
     {
-        // Verrou : deux validations simultanées ne doivent pas s'enchaîner.
-        $paid = DB::transaction(function () use ($order) {
-            $locked = Order::whereKey($order->id)->lockForUpdate()->first();
-            if ($locked->isPaid()) {
-                return null;
-            }
+        $validated = $request->validate([
+            'reference' => 'required|string|max:40',
+            'transaction_id' => 'required|string|max:100',
+        ]);
 
-            $locked->update(['payment_status' => 'paye', 'payment_method' => 'especes', 'paid_at' => now()]);
+        $transaction = Transaction::where('reference', $validated['reference'])->first();
+        abort_unless($transaction, 404, 'Paiement introuvable.');
 
-            return $locked;
-        });
+        // Le payeur, ou un responsable de la même entreprise : comme pour la visibilité des livraisons.
+        abort_unless($request->user()->canActForClient((int) $transaction->user_id), 403);
 
-        if (! $paid) {
-            return response()->json(['message' => 'Cette commande est déjà payée.'], 409);
+        try {
+            $transaction = $this->payments->confirm($transaction, $validated['transaction_id']);
+        } catch (RuntimeException) {
+            // KKiaPay injoignable : le webhook confirmera dès que possible, la page de suivi se met à jour toute seule.
+            return response()->json(['status' => 'pending'], 202);
         }
 
-        $this->auditLog->log('payment.cash_validated', $paid, ['amount' => $paid->price]);
-
-        // Le livreur voit le statut dans l'app, et reçoit aussi la notification s'il l'a fermée.
-        rescue(fn () => $paid->deliverer?->user?->notify(new PaymentValidatedForDeliverer($paid)));
-
-        return response()->json(['order' => $paid]);
-    }
-
-    private function startOnlinePayment(Order $order)
-    {
-        // Une tentative encore ouverte est reprise plutôt que dupliquée.
-        $transaction = $order->transactions()->where('status', 'pending')->latest()->first();
-
-        if (! $transaction) {
-            try {
-                $transaction = $this->fedapay->createTransactionForOrder($order->load('client'));
-            } catch (RuntimeException) {
-                return response()->json([
-                    'message' => 'Le paiement en ligne est momentanément indisponible. Vous pouvez payer en espèces.',
-                ], 502);
-            }
-        }
-
-        $order->update(['payment_method' => 'en_ligne', 'payment_status' => 'en_attente']);
-
-        return response()->json(['order' => $order->fresh(), 'payment' => $transaction]);
+        return response()->json([
+            'status' => $transaction->status,
+            'orders' => Order::where('transaction_id', $transaction->id)->get(),
+        ]);
     }
 }

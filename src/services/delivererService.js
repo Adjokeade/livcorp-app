@@ -21,14 +21,12 @@ const delivererService = {
   // Déroulé de la course. "point" : 'pickup' (retrait) ou 'dropoff' (destination).
   arrived: (orderId, point) => api.post(`/deliverer/orders/${orderId}/arrived`, { point }).then((r) => r.data.order),
 
-  // Remise contre le code du destinataire ; photo obligatoire pour un paiement en espèces (multipart).
-  deliver: (orderId, { code, photo }) => {
+  // Remise du colis : la photo de réception est obligatoire (multipart). L'expéditeur confirme ensuite la réception.
+  deliver: (orderId, { photo }) => {
     const form = new FormData();
-    form.append('delivery_code', code);
-    if (photo) form.append('delivery_photo', photo);
+    form.append('delivery_photo', photo);
     return api.post(`/deliverer/orders/${orderId}/deliver`, form).then((r) => r.data.order);
   },
-  remindCode: (orderId) => api.post(`/deliverer/orders/${orderId}/remind-code`).then((r) => r.data),
 
   // Désistement avant le retrait : reason ∈ panne | trop_loin | colis_different | client_injoignable | autre.
   release: (orderId, reason, note) =>
@@ -45,6 +43,9 @@ const delivererService = {
   // `accuracy` : précision du GPS en mètres (facultative), gardée côté serveur pour repérer les mauvaises positions.
   pushLocation: (orderId, lat, lng, accuracy) =>
     api.post(`/deliverer/orders/${orderId}/location`, { lat, lng, ...(accuracy != null ? { accuracy } : {}) }).then((r) => r.data),
+
+  // Livraison payée en espèces : le livreur confirme avoir encaissé le prix auprès de l'expéditeur, avant de récupérer le colis.
+  cashCollected: (orderId) => api.post(`/deliverer/orders/${orderId}/cash-collected`).then((r) => r.data.order),
 
   // Itinéraire : mes arrêts dans l'ordre (collecte des colis à prendre, destination de chaque colis), avec la distance
   // et la durée jusqu'à chacun depuis ma position. Sans position fournie, le serveur prend ma dernière connue.

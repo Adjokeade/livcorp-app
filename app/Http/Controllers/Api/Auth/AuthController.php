@@ -201,6 +201,11 @@ class AuthController extends Controller
             ], 422);
         }
 
+        // Vérification d'e-mail désactivée : un compte inscrit avant ce choix (donc resté « non vérifié ») est validé d'office.
+        if (! config('app.email_verification_required') && ! $user->email_verified_at) {
+            $user->forceFill(['email_verified_at' => now()])->save();
+        }
+
         $user->update(['last_login_at' => now()]);
         $this->auditLog->log('user.login', $user);
 
@@ -246,6 +251,11 @@ class AuthController extends Controller
 
     public function me(Request $request)
     {
+        // Même règle qu'à la connexion pour une session déjà ouverte : plus de bandeau « confirmez votre e-mail ».
+        if (! config('app.email_verification_required') && ! $request->user()->email_verified_at) {
+            $request->user()->forceFill(['email_verified_at' => now()])->save();
+        }
+
         // "path" reste côté serveur : on n'expose que le type et le statut des pièces.
         return response()->json($request->user()->load([
             'deliverer',

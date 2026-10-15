@@ -4,12 +4,14 @@ import useAuthStore from '../../store/useAuthStore';
 import clientOrderService from '../../services/clientOrderService';
 import profileService from '../../services/profileService';
 import FavoritesFirstOption from '../../components/client/FavoritesFirstOption';
+import PaymentMethodPicker from '../../components/client/PaymentMethodPicker';
 import AddressField from '../../components/client/AddressField';
 import PhotoField from '../../components/client/PhotoField';
 import Card from '../../components/common/Card';
 import Input from '../../components/common/Input';
 import Button from '../../components/common/Button';
 import { formatFcfa } from '../../lib/format';
+import { openKkiapayPayment } from '../../lib/loadKkiapay';
 
 const MAX_ROWS = 10;
 let nextKey = 1;
@@ -27,7 +29,11 @@ export default function BatchOrder() {
   const [error, setError] = useState('');
   const [rowErrors, setRowErrors] = useState({});
   const [created, setCreated] = useState(null);
+  const [payment, setPayment] = useState(null); // paiement unique couvrant tout l'envoi
+  const [paid, setPaid] = useState(false);
+  const [paying, setPaying] = useState({ busy: false, awaiting: false, error: '' });
   const [favoritesFirst, setFavoritesFirst] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState('en_ligne');
   const estimateCalls = useRef({});
 
   useEffect(() => {
@@ -71,6 +77,33 @@ export default function BatchOrder() {
     rows.forEach((row) => estimate(row, recipientOf(row), next));
   }
 
+  // Un seul paiement couvre tout l'envoi : les livraisons ne sont publiées aux livreurs qu'une fois payées.
+  async function startPayment(pay) {
+    setPaying({ busy: true, awaiting: false, error: '' });
+    try {
+      await openKkiapayPayment(pay, {
+        onSuccess: async (transactionId) => {
+          setPaying({ busy: false, awaiting: true, error: '' });
+          try {
+            const result = await clientOrderService.confirmPayment(pay.reference, transactionId);
+            if (result.status === 'approved') {
+              setPaid(true);
+              setPaying({ busy: false, awaiting: false, error: '' });
+            } else if (result.status === 'failed') {
+              setPaying({ busy: false, awaiting: false, error: "Le paiement n'a pas abouti. Vous pouvez réessayer." });
+            }
+          } catch (err) {
+            setPaying({ busy: false, awaiting: false, error: err.response?.data?.message ?? 'Impossible de confirmer le paiement. Contactez-nous si vous avez été débité.' });
+          }
+        },
+        onFailed: () => setPaying({ busy: false, awaiting: false, error: 'Le paiement a échoué ou a été annulé. Vous pouvez réessayer.' }),
+      });
+      setPaying((p) => ({ ...p, busy: false }));
+    } catch (err) {
+      setPaying({ busy: false, awaiting: false, error: err.message ?? 'Le paiement en ligne est indisponible.' });
+    }
+  }
+
   async function submit(e) {
     e.preventDefault();
     setError('');
@@ -90,8 +123,14 @@ export default function BatchOrder() {
 
     setBusy(true);
     try {
-      const orders = await clientOrderService.createBatch(pickup, rows.map((r) => ({ ...r, recipient: recipientOf(r) })), { favoritesFirst });
-      setCreated(orders);
+      const result = await clientOrderService.createBatch(pickup, rows.map((r) => ({ ...r, recipient: recipientOf(r) })), { favoritesFirst, paymentMethod });
+      setCreated(result.orders);
+      if (result.payment) {
+        setPayment(result.payment);
+        startPayment(result.payment);
+      } else {
+        setPaid(true); // espèces : rien à payer maintenant, les livraisons sont publiées
+      }
     } catch (err) {
       const errs = err.response?.data?.errors ?? {};
       const byRow = {};
@@ -111,10 +150,19 @@ export default function BatchOrder() {
   }
 
   if (created) {
+    const count = created.length;
     return (
       <Card>
-        <h1 className="font-display text-2xl font-bold">{created.length} livraison{created.length > 1 ? 's' : ''} créée{created.length > 1 ? 's' : ''}</h1>
-        <p className="mt-1 text-sm text-on-surface-variant">Les livreurs à proximité sont prévenus. Suivez chaque livraison depuis votre liste.</p>
+        <h1 className="font-display text-2xl font-bold">
+          {paid ? `${count} livraison${count > 1 ? 's' : ''} publiée${count > 1 ? 's' : ''}` : `Payez pour publier ${count > 1 ? `vos ${count} livraisons` : 'votre livraison'}`}
+        </h1>
+        <p className="mt-1 text-sm text-on-surface-variant">
+          {paid
+            ? (paymentMethod === 'especes'
+              ? 'Les livreurs à proximité sont prévenus. Vous remettrez le prix de chaque livraison en espèces au livreur, quand il vient récupérer le colis.'
+              : 'Les livreurs à proximité sont prévenus. Votre argent reste bloqué en sécurité chez LIV corp jusqu\'à la confirmation de réception de chaque colis.')
+            : 'Un seul paiement couvre tout l\'envoi (Mobile Money ou carte). Tant qu\'il n\'est pas fait, aucun livreur ne voit vos livraisons ; votre argent reste ensuite bloqué chez LIV corp jusqu\'à la confirmation de réception.'}
+        </p>
         <ul className="mt-4 flex flex-col gap-2">
           {created.map((o) => (
             <li key={o.id}>
@@ -125,9 +173,21 @@ export default function BatchOrder() {
             </li>
           ))}
         </ul>
+
+        {!paid && (
+          <div className="mt-5">
+            {paying.awaiting && <p role="status" className="mb-3 rounded bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">Paiement envoyé, confirmation en cours…</p>}
+            {paying.error && <p role="alert" className="mb-3 rounded bg-error-container px-3 py-2 text-sm text-on-error-container">{paying.error}</p>}
+            <Button onClick={() => startPayment(payment)} disabled={paying.busy || paying.awaiting} className="w-full">
+              {paying.busy ? 'Ouverture…' : `Payer ${formatFcfa(payment.amount)}`}
+            </Button>
+            <p className="mt-2 text-center text-xs text-on-surface-variant">Si vous fermez cette page, retrouvez ces livraisons dans « Mes livraisons » pour les payer (annulées sans paiement au bout de 30 minutes).</p>
+          </div>
+        )}
+
         <div className="mt-6 flex gap-3">
           <Link to="/client/commandes" className="btn-primary">Mes livraisons</Link>
-          <button type="button" className="btn-secondary" onClick={() => { setCreated(null); setRows([newRow()]); }}>Nouveau lot</button>
+          <button type="button" className="btn-secondary" onClick={() => { setCreated(null); setPayment(null); setPaid(false); setRows([newRow()]); }}>Nouveau lot</button>
         </div>
       </Card>
     );
@@ -214,10 +274,11 @@ export default function BatchOrder() {
       </div>
 
       <FavoritesFirstOption checked={favoritesFirst} onChange={setFavoritesFirst} />
+      <PaymentMethodPicker value={paymentMethod} onChange={setPaymentMethod} price={formatFcfa(total)} />
 
       {error && <p role="alert" className="rounded bg-error-container px-3 py-2 text-sm text-on-error-container">{error}</p>}
       <Button type="submit" disabled={busy} className="w-full sm:w-auto sm:self-start">
-        {busy ? 'Envoi…' : `Lancer ${rows.length} livraison${rows.length > 1 ? 's' : ''}`}
+        {busy ? 'Création…' : paymentMethod === 'especes' ? `Publier ${rows.length} livraison${rows.length > 1 ? 's' : ''}` : `Payer ${formatFcfa(total)} et publier`}
       </Button>
     </form>
   );

@@ -108,24 +108,6 @@ class DeliveryInteractionsTest extends TestCase
         $this->assertStringNotContainsString($client->email, $raw);
     }
 
-    public function test_only_the_owner_sees_the_code_and_only_while_the_delivery_is_pending(): void
-    {
-        [$client, , $order] = $this->course(Order::STATUS_EN_COURS_LIVRAISON);
-
-        $this->actingAs($client, 'sanctum')->getJson("/api/v1/client/orders/{$order->id}")->assertJsonPath('delivery_code', '4821');
-
-        $order->update(['status' => Order::STATUS_LIVREE]);
-        $this->getJson("/api/v1/client/orders/{$order->id}")->assertJsonMissingPath('delivery_code');
-    }
-
-    public function test_the_code_is_stored_encrypted_and_generated_at_creation(): void
-    {
-        [, , $order] = $this->course(Order::STATUS_ACCEPTEE);
-
-        $this->assertNotSame('4821', DB::table('orders')->where('id', $order->id)->value('delivery_code'));
-        $this->assertSame('4821', $order->fresh()->delivery_code);
-    }
-
     public function test_recipient_phone_disappears_from_the_deliverers_list_once_the_order_is_over(): void
     {
         [, $deliverer, $order] = $this->course(Order::STATUS_EN_COURS_LIVRAISON, ['recipient_phone' => '+22901970000']);
@@ -264,129 +246,6 @@ class DeliveryInteractionsTest extends TestCase
     private function payOnline(Order $order): void
     {
         $order->update(['payment_status' => 'paye', 'payment_method' => 'en_ligne']);
-    }
-
-    public function test_the_right_code_completes_the_delivery_and_books_the_commission(): void
-    {
-        [, $deliverer, $order] = $this->course(Order::STATUS_EN_COURS_LIVRAISON);
-        $this->payOnline($order);
-
-        $this->actingAs($deliverer->user, 'sanctum')->postJson("/api/v1/deliverer/orders/{$order->id}/deliver", ['delivery_code' => '4821'])
-            ->assertOk()
-            ->assertJsonPath('order.status', 'livree');
-
-        $this->assertNotNull($order->fresh()->delivered_at);
-        $this->assertSame(1, Commission::count());
-    }
-
-    public function test_a_wrong_code_is_refused_with_the_remaining_attempts(): void
-    {
-        [, $deliverer, $order] = $this->course(Order::STATUS_EN_COURS_LIVRAISON);
-        $this->payOnline($order);
-
-        $this->actingAs($deliverer->user, 'sanctum')->postJson("/api/v1/deliverer/orders/{$order->id}/deliver", ['delivery_code' => '0000'])
-            ->assertUnprocessable()
-            ->assertJsonPath('message', 'Code incorrect. Il vous reste 4 essais.');
-
-        $this->assertSame(Order::STATUS_EN_COURS_LIVRAISON, $order->fresh()->status);
-    }
-
-    public function test_five_wrong_codes_lock_the_delivery_and_warn_the_client_then_it_reopens(): void
-    {
-        Notification::fake();
-        [$client, $deliverer, $order] = $this->course(Order::STATUS_EN_COURS_LIVRAISON);
-        $this->payOnline($order);
-        $this->actingAs($deliverer->user, 'sanctum');
-
-        foreach (range(1, 4) as $i) {
-            $this->postJson("/api/v1/deliverer/orders/{$order->id}/deliver", ['delivery_code' => '0000'])->assertUnprocessable();
-        }
-        $this->postJson("/api/v1/deliverer/orders/{$order->id}/deliver", ['delivery_code' => '0000'])->assertStatus(429);
-        Notification::assertSentTo($client, DeliveryCodeLocked::class);
-
-        // Bloqué même avec le bon code.
-        $this->postJson("/api/v1/deliverer/orders/{$order->id}/deliver", ['delivery_code' => '4821'])->assertStatus(429);
-
-        // La minute passe : la remise se rouvre.
-        $this->travel(16)->minutes();
-        $this->postJson("/api/v1/deliverer/orders/{$order->id}/deliver", ['delivery_code' => '4821'])->assertOk();
-    }
-
-    public function test_the_code_is_required_and_the_payment_must_be_validated(): void
-    {
-        [, $deliverer, $order] = $this->course(Order::STATUS_EN_COURS_LIVRAISON, ['payment_status' => 'en_attente', 'payment_method' => null]);
-        $this->actingAs($deliverer->user, 'sanctum');
-
-        $this->postJson("/api/v1/deliverer/orders/{$order->id}/deliver", ['delivery_code' => '4821'])
-            ->assertUnprocessable()
-            ->assertJsonPath('message', 'Le paiement n\'est pas encore validé par le client.');
-
-        $this->payOnline($order);
-        $this->postJson("/api/v1/deliverer/orders/{$order->id}/deliver", [])->assertUnprocessable()->assertJsonValidationErrors('delivery_code');
-        $this->postJson("/api/v1/deliverer/orders/{$order->id}/deliver", ['delivery_code' => '12'])->assertUnprocessable();
-    }
-
-    public function test_a_cash_payment_requires_a_delivery_photo_which_the_client_can_see(): void
-    {
-        Storage::fake('parcel_photos');
-        [$client, $deliverer, $order] = $this->course(Order::STATUS_EN_COURS_LIVRAISON);
-        $order->update(['payment_status' => 'paye', 'payment_method' => 'especes']);
-        $this->actingAs($deliverer->user, 'sanctum');
-
-        $this->postJson("/api/v1/deliverer/orders/{$order->id}/deliver", ['delivery_code' => '4821'])->assertJsonValidationErrors('delivery_photo');
-
-        $this->post("/api/v1/deliverer/orders/{$order->id}/deliver", [
-            'delivery_code' => '4821',
-            'delivery_photo' => UploadedFile::fake()->image('remise.jpg', 1200, 900),
-        ], ['Accept' => 'application/json'])->assertOk()->assertJsonPath('order.status', 'livree');
-
-        Storage::disk('parcel_photos')->assertExists($order->fresh()->delivery_photo_path);
-
-        $url = $this->actingAs($client, 'sanctum')->getJson("/api/v1/client/orders/{$order->id}")->json('delivery_photo_url');
-        $this->assertNotNull($url);
-        $this->get($url)->assertOk()->assertHeader('Content-Type', 'image/jpeg');
-        $this->get("/api/v1/orders/{$order->id}/delivery-photo")->assertForbidden(); // sans signature
-    }
-
-    public function test_the_photo_is_optional_for_an_online_payment(): void
-    {
-        [, $deliverer, $order] = $this->course(Order::STATUS_EN_COURS_LIVRAISON);
-        $this->payOnline($order);
-
-        $this->actingAs($deliverer->user, 'sanctum')->postJson("/api/v1/deliverer/orders/{$order->id}/deliver", ['delivery_code' => '4821'])->assertOk();
-    }
-
-    public function test_the_plain_status_button_can_no_longer_complete_a_coded_delivery(): void
-    {
-        [, $deliverer, $order] = $this->course(Order::STATUS_EN_COURS_LIVRAISON);
-        $this->payOnline($order);
-
-        $this->actingAs($deliverer->user, 'sanctum')->patchJson("/api/v1/deliverer/orders/{$order->id}/status", ['status' => 'livree'])
-            ->assertUnprocessable()
-            ->assertJsonPath('message', 'Saisissez le code de remise donné par le destinataire.');
-    }
-
-    public function test_an_older_order_without_a_code_still_completes_the_old_way(): void
-    {
-        [, $deliverer, $order] = $this->course(Order::STATUS_EN_COURS_LIVRAISON, ['delivery_code' => null]);
-        $this->payOnline($order);
-
-        $this->actingAs($deliverer->user, 'sanctum')->patchJson("/api/v1/deliverer/orders/{$order->id}/status", ['status' => 'livree'])->assertOk();
-    }
-
-    public function test_the_deliverer_can_ask_the_client_to_find_the_code_but_not_endlessly(): void
-    {
-        Notification::fake();
-        RateLimiter::clear('code-reminder:1');
-        [$client, $deliverer, $order] = $this->course(Order::STATUS_EN_COURS_LIVRAISON);
-        RateLimiter::clear("code-reminder:{$order->id}");
-        $this->actingAs($deliverer->user, 'sanctum');
-
-        foreach (range(1, 3) as $i) {
-            $this->postJson("/api/v1/deliverer/orders/{$order->id}/remind-code")->assertOk();
-        }
-        $this->postJson("/api/v1/deliverer/orders/{$order->id}/remind-code")->assertStatus(429);
-        Notification::assertSentToTimes($client, DeliveryCodeReminder::class, 3);
     }
 
     // ================================================================ Désistement
@@ -536,20 +395,4 @@ class DeliveryInteractionsTest extends TestCase
         $this->actingAs($this->makeUser('client'), 'sanctum')->postJson("/api/v1/client/orders/{$order->id}/retry-delivery")->assertForbidden();
     }
 
-    public function test_a_new_order_gets_a_code_and_keeps_its_initial_price(): void
-    {
-        \Illuminate\Support\Facades\Http::fake(['*' => \Illuminate\Support\Facades\Http::response(['code' => 'Ok', 'routes' => [['distance' => 9000, 'duration' => 600, 'geometry' => ['coordinates' => [[2.41, 6.36], [2.36, 6.35]]]]]])]);
-        Storage::fake('parcel_photos');
-
-        $this->actingAs($this->makeUser('client'), 'sanctum')->postJson('/api/v1/client/orders', [
-            'type' => 'colis', 'pickup_address' => 'A', 'pickup_lat' => 6.36, 'pickup_lng' => 2.41,
-            'dropoff_address' => 'B', 'dropoff_lat' => 6.35, 'dropoff_lng' => 2.36,
-            'recipient_name' => 'Koffi', 'recipient_phone' => '+22901000000',
-            'photo' => UploadedFile::fake()->image('c.jpg'),
-        ])->assertCreated()->assertJsonMissingPath('order.delivery_code');
-
-        $order = Order::first();
-        $this->assertMatchesRegularExpression('/^\d{4}$/', $order->delivery_code);
-        $this->assertSame($order->price, $order->initial_price); // prix imposé par le serveur
-    }
 }

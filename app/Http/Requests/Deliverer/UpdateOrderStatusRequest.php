@@ -14,7 +14,7 @@ class UpdateOrderStatusRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'status' => 'required|in:colis_recupere,en_cours_livraison,livree',
+            'status' => 'required|in:colis_recupere,en_cours_livraison',
             'note' => 'nullable|string|max:500',
         ];
     }

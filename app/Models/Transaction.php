@@ -11,15 +11,15 @@ class Transaction extends Model
     use HasFactory;
 
     protected $fillable = [
-        'order_id', 'user_id', 'fedapay_transaction_id', 'method', 'amount', 'currency',
-        'status', 'fedapay_payload', 'paid_at',
+        'order_id', 'user_id', 'provider', 'reference', 'provider_transaction_id', 'method', 'amount', 'currency',
+        'status', 'provider_payload', 'paid_at', 'refund_status', 'refund_note',
     ];
 
     protected function casts(): array
     {
         return [
             'amount' => 'decimal:2',
-            'fedapay_payload' => 'array',
+            'provider_payload' => 'array',
             'paid_at' => 'datetime',
         ];
     }

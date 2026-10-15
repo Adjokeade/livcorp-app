@@ -4,7 +4,6 @@ import { formatDuration, formatFcfa, formatKm, formatTime } from '../../lib/form
 import Button from '../common/Button';
 import Card from '../common/Card';
 import ChatSheet from '../common/ChatSheet';
-import PaymentBadge from '../common/PaymentBadge';
 import Sheet from '../common/Sheet';
 import StatusBadge from '../common/StatusBadge';
 import PhotoField from '../client/PhotoField';
@@ -40,7 +39,7 @@ function errorText(err, fallback = 'Action impossible. Réessayez.') {
 }
 
 // Une course acceptée, côté livreur : où aller, ce qu'il reste à faire, et les actions de chaque étape
-// (arrivée, remise avec code, désistement, destinataire injoignable, discussion avec le client).
+// (arrivée, remise avec photo de réception, désistement, destinataire injoignable, discussion avec le client).
 export default function MyOrderCard({ order, nextStop = null, busy, onAdvance, onChanged, onMessagesRead, autoOpenChat = false, onChatShown }) {
   const now = useNow();
   const [chatOpen, setChatOpen] = useState(autoOpenChat);
@@ -57,9 +56,9 @@ export default function MyOrderCard({ order, nextStop = null, busy, onAdvance, o
 
   const status = order.status;
   const inProgress = ['acceptee', 'colis_recupere', 'en_cours_livraison'].includes(status);
-  const paid = order.payment_status === 'paye';
-  const blockedByPayment = status === 'en_cours_livraison' && !paid;
-  const conversationOpen = inProgress || status === 'litige';
+  // Livraison payée en espèces et pas encore encaissée : on ne récupère pas le colis avant d'avoir reçu l'argent.
+  const cashToCollect = status === 'acceptee' && order.payment_method === 'especes' && order.payment_status !== 'paye';
+  const conversationOpen = inProgress || status === 'remise' || status === 'litige';
   const failed = status === 'litige' && order.failed_delivery_at;
 
   // Attente sur place : elle compte à partir du "Je suis arrivé" à la destination.
@@ -132,15 +131,18 @@ export default function MyOrderCard({ order, nextStop = null, busy, onAdvance, o
               Le client a annulé cette course : ne vous déplacez pas.
             </p>
           )}
-          {inProgress && (
-            <p className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-              <PaymentBadge order={order} />
-              {!paid && (
-                <span className="text-on-surface-variant">
-                  À encaisser à la remise : <strong className="text-on-surface">{formatFcfa(order.price)}</strong>
-                </span>
-              )}
-            </p>
+          {(inProgress || status === 'remise') && (
+            order.payment_method === 'especes' ? (
+              <p className="mt-2 rounded bg-secondary-fixed px-3 py-2 text-sm text-on-secondary-fixed">
+                {order.payment_status === 'paye'
+                  ? `Payé en espèces : vous avez encaissé ${formatFcfa(order.price)}. Votre commission sera déduite de vos prochains versements.`
+                  : `Paiement en espèces : ${formatFcfa(order.price)} à encaisser auprès de l'expéditeur au retrait.`}
+              </p>
+            ) : (
+              <p className="mt-2 rounded bg-secondary-fixed px-3 py-2 text-sm text-on-secondary-fixed">
+                Déjà payé par le client et bloqué chez LIV corp. Vous serez crédité de <strong>{formatFcfa(order.estimated_earnings ?? order.price)}</strong> dès que l'expéditeur confirmera la réception.
+              </p>
+            )
           )}
         </div>
         <StatusBadge status={status} forDeliverer className="self-start sm:self-center" />
@@ -163,7 +165,18 @@ export default function MyOrderCard({ order, nextStop = null, busy, onAdvance, o
               {working === 'arrive-pickup' ? '…' : 'Je suis arrivé au point de retrait'}
             </Button>
           )}
-          <Button onClick={() => onAdvance(order)} disabled={busy || working !== null}>
+          {cashToCollect && (
+            <div className="rounded-lg border-2 border-primary p-3">
+              <p className="text-sm font-semibold">Paiement en espèces : encaissez {formatFcfa(order.price)}</p>
+              <p className="mt-1 text-xs text-on-surface-variant">
+                Auprès de l'expéditeur, en main propre, avant de récupérer le colis. Vous gardez cet argent : seule votre commission ({formatFcfa(Math.round(order.price - (order.estimated_earnings ?? order.price)))}) est due à LIV corp, déduite de vos prochains versements.
+              </p>
+              <Button onClick={() => run('cash', () => delivererService.cashCollected(order.id), 'Encaissement confirmé : vous pouvez récupérer le colis.')} disabled={working !== null} className="mt-3 w-full">
+                {working === 'cash' ? '…' : `J'ai encaissé ${formatFcfa(order.price)} en espèces`}
+              </Button>
+            </div>
+          )}
+          <Button onClick={() => onAdvance(order)} disabled={busy || working !== null || cashToCollect}>
             {busy ? '…' : NEXT_STATUS.acceptee.label}
           </Button>
         </div>
@@ -187,32 +200,12 @@ export default function MyOrderCard({ order, nextStop = null, busy, onAdvance, o
             </Button>
           )}
 
-          {blockedByPayment && (
-            <p role="status" className="rounded bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">
-              En attente de la validation du paiement par le client. Le bouton de remise s'activera dès qu'il l'aura fait.
-            </p>
-          )}
-          {paid && (
-            <p role="status" className="rounded bg-secondary-fixed px-3 py-2 text-sm text-on-secondary-fixed">
-              Paiement validé{order.payment_method === 'especes' ? ` : le client vous a remis ${formatFcfa(order.price)} en espèces.` : ' en ligne.'}{' '}
-              Demandez le code de remise au destinataire.
-            </p>
-          )}
-
-          <Button onClick={() => setDeliverOpen(true)} disabled={blockedByPayment || working !== null}>
-            Remettre le colis
+          <Button onClick={() => setDeliverOpen(true)} disabled={working !== null}>
+            Remettre le colis (photo de réception)
           </Button>
 
           {order.dropoff_arrived_at && (
             <div className="flex flex-col gap-1 text-sm">
-              <button
-                type="button"
-                onClick={() => run('remind', () => delivererService.remindCode(order.id), 'Le client a été prévenu : il retrouve son code dans l\'application.')}
-                disabled={working !== null}
-                className="self-start font-semibold text-secondary underline"
-              >
-                {working === 'remind' ? '…' : 'Le destinataire a oublié son code'}
-              </button>
               {canDeclareUnreachable ? (
                 <button
                   type="button"
@@ -231,6 +224,12 @@ export default function MyOrderCard({ order, nextStop = null, busy, onAdvance, o
             </div>
           )}
         </div>
+      )}
+
+      {status === 'remise' && (
+        <p role="status" className="rounded bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">
+          Photo de réception envoyée{order.handed_over_at ? ` à ${formatTime(order.handed_over_at)}` : ''}. En attente de la confirmation de l'expéditeur : sans réponse de sa part, elle sera confirmée automatiquement.
+        </p>
       )}
 
       {failed && (
@@ -303,40 +302,33 @@ export default function MyOrderCard({ order, nextStop = null, busy, onAdvance, o
   );
 }
 
-// Remise du colis : le destinataire donne son code de remise au livreur (photo en plus pour un paiement en espèces).
+// Remise du colis : la photo de réception est OBLIGATOIRE. Le destinataire n'a pas besoin de l'application : c'est l'expéditeur
+// qui voit cette photo et confirme la réception, ce qui déclenche le paiement du livreur.
 function DeliverSheet({ open, order, onClose, onDelivered }) {
-  const [code, setCode] = useState('');
   const [photo, setPhoto] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const cashPhoto = order.payment_method === 'especes';
 
   useEffect(() => {
     if (open) {
-      setCode('');
       setPhoto(null);
       setError('');
     }
   }, [open]);
 
   async function submit(e) {
-    e.preventDefault();
-    if (!/^\d{4}$/.test(code)) {
-      setError('Le code de remise comporte 4 chiffres.');
-      return;
-    }
-    if (cashPhoto && !photo) {
-      setError('Prenez une photo du colis remis : elle est obligatoire pour un paiement en espèces.');
+    e?.preventDefault();
+    if (!photo) {
+      setError('Prenez une photo du colis remis : elle prouve la réception.');
       return;
     }
     setBusy(true);
     setError('');
     try {
-      await delivererService.deliver(order.id, { code, photo });
+      await delivererService.deliver(order.id, { photo });
       onDelivered();
     } catch (err) {
       setError(errorText(err, 'Remise impossible. Réessayez.'));
-      setCode('');
     } finally {
       setBusy(false);
     }
@@ -349,43 +341,18 @@ function DeliverSheet({ open, order, onClose, onDelivered }) {
       title="Remettre le colis"
       subtitle={`#${order.reference}`}
       footer={
-        <Button onClick={submit} disabled={busy} className="w-full">
-          {busy ? 'Vérification…' : 'Confirmer la livraison'}
+        <Button onClick={submit} disabled={busy || !photo} className="w-full">
+          {busy ? 'Envoi…' : 'Envoyer la photo et valider la remise'}
         </Button>
       }
     >
       <form onSubmit={submit} className="flex flex-col gap-4">
         <p className="text-sm text-on-surface-variant">
-          Demandez le <strong className="text-on-surface">code de remise à 4 chiffres</strong> au destinataire, en face de vous. C'est ce code qui
-          confirme la livraison.
+          Photographiez le colis une fois <strong className="text-on-surface">remis au destinataire</strong> (on doit voir le colis et, si possible, son lieu de remise).
+          L'expéditeur la verra et confirmera la réception : vous serez alors crédité.
         </p>
 
-        <div>
-          <label htmlFor="delivery-code" className="mb-1.5 block text-sm font-semibold">
-            Code du destinataire
-          </label>
-          <input
-            id="delivery-code"
-            className="input-field text-center font-display text-3xl font-extrabold tracking-[0.5em]"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            autoComplete="one-time-code"
-            maxLength={4}
-            value={code}
-            onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 4))}
-            data-autofocus
-            placeholder="••••"
-          />
-        </div>
-
-        <PhotoField
-          file={photo}
-          onChange={setPhoto}
-          required={cashPhoto}
-          label="Photo du colis remis"
-          hint={cashPhoto ? 'Obligatoire pour un paiement en espèces : elle protège le client et vous.' : 'Une preuve en plus en cas de doute.'}
-          filename="remise.jpg"
-        />
+        <PhotoField file={photo} onChange={setPhoto} required label="Photo de réception" hint="Obligatoire : c'est votre preuve de livraison." filename="reception.jpg" />
 
         {error && (
           <p role="alert" className="rounded bg-error-container px-3 py-2 text-sm text-on-error-container">
@@ -393,7 +360,7 @@ function DeliverSheet({ open, order, onClose, onDelivered }) {
           </p>
         )}
         <button type="submit" className="sr-only">
-          Confirmer
+          Valider
         </button>
       </form>
     </Sheet>

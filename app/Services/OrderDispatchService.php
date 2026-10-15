@@ -18,6 +18,27 @@ class OrderDispatchService
      * @param 'all'|'favorites'|'others' $audience favorites : seulement les livreurs favoris du client ;
      *                                              others : tous les autres (ceux qui n'ont pas déjà été prévenus).
      */
+    /** Durée pendant laquelle une course « d'abord aux favoris » leur est réservée. */
+    public const PRIORITY_MINUTES = 10;
+
+    /**
+     * Publie une livraison PAYÉE : les livreurs proches sont prévenus. Avec « d'abord à mes favoris », seuls les favoris
+     * la voient et la reçoivent pendant la période de priorité, qui démarre à la publication (pas à la création, le
+     * client pouvant mettre quelques minutes à payer).
+     */
+    public function publish(Order $order): void
+    {
+        if ($order->priority_owner_id) {
+            $order->update(['priority_until' => now()->addMinutes(self::PRIORITY_MINUTES)]);
+            $this->notifyNearbyDeliverers($order->fresh(), 'favorites');
+            \App\Jobs\OpenOrderToAllDeliverers::dispatch($order)->delay($order->fresh()->priority_until);
+
+            return;
+        }
+
+        $this->notifyNearbyDeliverers($order);
+    }
+
     public function notifyNearbyDeliverers(Order $order, string $audience = 'all'): int
     {
         $favoriteIds = $order->priority_owner_id

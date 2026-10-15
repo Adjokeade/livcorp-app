@@ -60,7 +60,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | URL racine de la SPA React (Vite). Utilisée pour construire les liens
-    | des e-mails transactionnels et le callback_url des transactions FedaPay.
+    | des e-mails transactionnels (mot de passe oublié, notifications).
     | Définie via FRONTEND_URL dans le .env ; retombe sur APP_URL si absente.
     |
     */
@@ -73,7 +73,7 @@ return [
     | sans serveur d'envoi, mettre EMAIL_VERIFICATION_REQUIRED=false : les
     | comptes sont alors marqués vérifiés dès l'inscription.
     */
-    'email_verification_required' => (bool) env('EMAIL_VERIFICATION_REQUIRED', true),
+    'email_verification_required' => (bool) env('EMAIL_VERIFICATION_REQUIRED', false),
 
     /*
     |--------------------------------------------------------------------------

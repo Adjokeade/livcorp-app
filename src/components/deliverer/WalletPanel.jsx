@@ -22,10 +22,10 @@ const EARNING_STATUS = {
 };
 
 const PAYOUT_STATUS = {
-  pending: 'En attente',
+  pending: 'À payer par LIV corp',
   processing: 'En cours',
   paid: 'Versé',
-  failed: 'Échec, nouvel essai automatique',
+  failed: 'Annulé',
 };
 
 // Portefeuille du livreur : solde à recevoir, numéro Mobile Money, gains par course, versements.
@@ -80,24 +80,30 @@ export default function WalletPanel() {
         </Card>
       </div>
 
+      {wallet.pending_confirmation > 0 && (
+        <p role="status" className="rounded bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">
+          <strong>{formatFcfa(wallet.pending_confirmation)}</strong> en attente : vous avez remis le colis, l'argent est bloqué chez LIV corp et
+          vous sera crédité dès que l'expéditeur confirme la réception (ou automatiquement sous 24 h).
+        </p>
+      )}
+
       {(wallet.balance < 0 || wallet.cash_collected > 0) && (
         <p className="rounded bg-surface-container px-3 py-2 text-sm text-on-surface-variant">
           {wallet.cash_collected > 0 && (
             <>
-              Vous avez encaissé <strong className="text-on-surface">{formatFcfa(wallet.cash_collected)}</strong> en
-              espèces auprès de vos clients : cet argent est à vous, seule la commission de {wallet.commission_rate} %
-              est due à LIV corp.{' '}
+              Vous avez encaissé <strong className="text-on-surface">{formatFcfa(wallet.cash_collected)}</strong> en espèces
+              auprès de vos clients : cet argent est à vous, seule la commission de {wallet.commission_rate} % est due à LIV corp.{' '}
             </>
           )}
           {wallet.balance < 0 &&
-            'Elle sera déduite automatiquement de vos prochains gains sur les paiements en ligne. Aucun versement n\'est fait tant que ce solde est négatif.'}
+            "Elle est déduite automatiquement de vos prochains gains sur les paiements en ligne. Aucun versement n'est fait tant que ce solde est négatif."}
         </p>
       )}
 
       <Card>
         <h2 className="font-display text-lg font-bold">Numéro de versement Mobile Money</h2>
         <p className="mt-1 text-sm text-on-surface-variant">
-          Les gains des paiements en ligne sont versés automatiquement sur ce numéro. LIV corp prélève{' '}
+          Vos gains, crédités après la confirmation de réception de chaque colis, sont envoyés sur ce numéro par LIV corp. LIV corp prélève{' '}
           {wallet.commission_rate} % sur chaque course, les montants ci-dessous sont déjà nets.
         </p>
         {!wallet.mobile_money_number && (

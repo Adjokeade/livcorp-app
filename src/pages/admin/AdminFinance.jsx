@@ -10,7 +10,7 @@ import { Loading } from './AdminBackOffice';
 
 const PERIODS = [['week', '7 jours'], ['month', '30 jours'], ['year', '12 mois'], ['all', 'Tout']];
 const COMMISSION_STATUS = { due: ['À verser', 'warn'], included_in_payout: ['Versement en cours', 'warn'], paid: ['Réglée', 'ok'] };
-const PAYOUT_STATUS = { pending: ['En attente', 'warn'], processing: ['En cours', 'warn'], paid: ['Versé', 'ok'], failed: ['Échoué', 'bad'] };
+const PAYOUT_STATUS = { pending: ['À payer', 'warn'], processing: ['En cours', 'warn'], paid: ['Versé', 'ok'], failed: ['Annulé', 'neutral'] };
 
 function Metric({ label, value, hint, tone }) {
   return (
@@ -44,6 +44,11 @@ function Overview({ onNavigate }) {
       </div>
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Metric label="Argent bloqué chez LIV corp" value={formatFcfa(data.held_amount)} hint="Payé d'avance, réception pas encore confirmée" tone={data.held_amount > 0 ? 'accent' : undefined} />
+        <Metric label="Remboursements à faire" value={data.refunds_to_do} hint="À la main, depuis KKiaPay" tone={data.refunds_to_do > 0 ? 'bad' : undefined} />
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric label="Commissions perçues" value={formatFcfa(data.commission_total)} hint={`Taux actuel : ${data.commission_rate} %`} tone="accent" />
         <Metric label="Volume des livraisons" value={formatFcfa(data.volume)} hint={`${data.deliveries} livraison${data.deliveries > 1 ? 's' : ''} payée${data.deliveries > 1 ? 's' : ''}`} />
         <Metric label="Payé en ligne" value={formatFcfa(data.volume_online)} hint="Encaissé par LIV corp" />
@@ -54,7 +59,7 @@ function Overview({ onNavigate }) {
         <Metric label="À verser aux livreurs" value={formatFcfa(data.owed_to_deliverers)} hint="Paiements en ligne, net de commission" />
         <Metric label="Commissions espèces à recouvrer" value={formatFcfa(data.owed_by_deliverers)} hint="Imputées sur leurs prochains versements" />
         <Metric label="Versé aux livreurs" value={formatFcfa(data.paid_out)} hint="Sur la période" />
-        <Metric label="Versements échoués" value={data.failed_payouts} hint={data.processing_payouts ? `${data.processing_payouts} en cours` : 'À relancer'} tone={data.failed_payouts > 0 ? 'bad' : undefined} />
+        <Metric label="Versements à payer" value={data.processing_payouts} hint="En Mobile Money, à la main" tone={data.processing_payouts > 0 ? 'accent' : undefined} />
       </div>
 
       <Card>
@@ -163,8 +168,30 @@ function Payouts() {
   useEffect(() => setPage(1), [status]);
   useEffect(() => { load(); }, [page, status]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  async function pay(p) {
+    const reference = window.prompt(`Après avoir envoyé ${formatFcfa(p.total_amount)} au ${p.mobile_money_number} en Mobile Money, saisissez la référence de l'opérateur (facultatif) :`, '');
+    if (reference === null) return;
+    try {
+      await adminService.payPayout(p.id, reference.trim());
+      setNotice(`Versement de ${formatFcfa(p.total_amount)} marqué comme versé. ${p.deliverer.name} est prévenu.`);
+      load();
+    } catch (err) {
+      setNotice(err.response?.data?.message ?? 'Action impossible.');
+    }
+  }
+
+  async function cancel(p) {
+    if (!window.confirm('Annuler ce versement ? Ses commissions reviennent « à verser » et seront regroupées au prochain passage.')) return;
+    try {
+      await adminService.cancelPayout(p.id);
+      load();
+    } catch (err) {
+      setNotice(err.response?.data?.message ?? 'Action impossible.');
+    }
+  }
+
   async function run() {
-    if (!window.confirm('Lancer maintenant le versement de tous les montants dus aux livreurs ? Ils sont d\'ordinaire versés chaque soir à 20 h.')) return;
+    if (!window.confirm('Préparer maintenant les versements dus aux livreurs ? Ils sont d\'ordinaire préparés chaque soir à 20 h. Rien n\'est envoyé : vous les payez ensuite en Mobile Money.')) return;
     setBusy(true);
     try {
       const r = await adminService.runPayouts();
@@ -180,9 +207,9 @@ function Payouts() {
   return (
     <div>
       <div className="flex flex-wrap items-center gap-3">
-        <Select label="Statut" value={status} onChange={setStatus} options={[['', 'Tous les versements'], ['paid', 'Versés'], ['processing', 'En cours'], ['pending', 'En attente'], ['failed', 'Échoués']]} />
+        <Select label="Statut" value={status} onChange={setStatus} options={[['', 'Tous les versements'], ['pending', 'À payer'], ['paid', 'Versés'], ['failed', 'Annulés']]} />
         {result && <span className="text-sm text-on-surface-variant">{result.total} versement{result.total > 1 ? 's' : ''}</span>}
-        <Button variant="secondary" onClick={run} disabled={busy} className="ml-auto !px-4 !py-2 text-sm">{busy ? 'Lancement…' : 'Lancer les versements maintenant'}</Button>
+        <Button variant="secondary" onClick={run} disabled={busy} className="ml-auto !px-4 !py-2 text-sm">{busy ? 'Préparation…' : 'Préparer les versements maintenant'}</Button>
       </div>
       {notice && <p role="status" className="mt-3 rounded bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">{notice}</p>}
 
@@ -199,12 +226,64 @@ function Payouts() {
                   <p className="text-xs text-on-surface-variant">{formatDate(p.period_start)} → {formatDate(p.period_end)} · {p.mobile_money_number ?? 'Mobile Money manquant'}{p.paid_at ? ` · versé le ${formatDate(p.paid_at)}` : ''}</p>
                 </div>
                 <div className="flex items-center gap-3"><span className="font-display text-lg font-bold">{formatFcfa(p.total_amount)}</span><Badge tone={tone}>{label}</Badge></div>
+                {p.status === 'pending' && (
+                  <div className="flex w-full flex-wrap items-center justify-between gap-2 border-t border-outline-variant pt-2">
+                    <span className="text-sm">
+                      Envoyer par Mobile Money au <strong>{p.mobile_money_number ?? 'numéro manquant'}</strong>
+                      {p.mobile_money_number && (
+                        <button type="button" onClick={() => navigator.clipboard?.writeText(p.mobile_money_number)} className="ml-2 text-xs font-semibold text-secondary underline">Copier</button>
+                      )}
+                    </span>
+                    <span className="flex gap-3">
+                      <button type="button" onClick={() => cancel(p)} className="text-sm font-semibold text-error">Annuler</button>
+                      <Button onClick={() => pay(p)} className="!px-4 !py-1.5 text-sm">Marquer comme versé</Button>
+                    </span>
+                  </div>
+                )}
+                {p.reference && <p className="w-full text-xs text-on-surface-variant">Référence opérateur : {p.reference}</p>}
               </li>
             );
           })}
         </ul>
       )}
       <Pager page={result?.current_page ?? 1} last={result?.last_page} onChange={setPage} />
+    </div>
+  );
+}
+
+function Refunds() {
+  const [list, setList] = useState(null);
+  const load = () => adminService.financeRefunds().then(setList).catch(() => setList([]));
+  useEffect(() => { load(); }, []);
+
+  async function done(t) {
+    if (!window.confirm(`Avez-vous bien remboursé ${formatFcfa(t.amount)} à ${t.client} depuis le tableau de bord KKiaPay ?`)) return;
+    await adminService.markRefundDone(t.id);
+    load();
+  }
+
+  if (!list) return <Loading />;
+  return (
+    <div>
+      <p className="text-sm text-on-surface-variant">Remboursements que l'API ne sait pas faire seule (paiement par carte, envoi en lot, remboursement partiel, panne). À régler depuis le tableau de bord KKiaPay, puis à marquer comme faits ici.</p>
+      {list.length === 0 ? (
+        <p className="mt-6 text-on-surface-variant">Aucun remboursement en attente.</p>
+      ) : (
+        <ul className="mt-4 flex flex-col gap-2">
+          {list.map((t) => (
+            <li key={t.id} className="rounded-xl bg-surface-container-lowest p-4 shadow-card">
+              <div className="flex flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="font-semibold">{t.client} · {formatFcfa(t.amount)}</p>
+                  <p className="text-xs text-on-surface-variant">Livraison{t.orders.length > 1 ? 's' : ''} {t.orders.map((o) => `#${o}`).join(', ')} · {t.method === 'carte' ? 'carte' : 'Mobile Money'} · transaction KKiaPay {t.provider_transaction_id ?? '—'}</p>
+                  {t.note && <p className="mt-1 text-sm">{t.note}</p>}
+                </div>
+                <Button onClick={() => done(t)} className="!px-4 !py-1.5 text-sm">Marquer comme remboursé</Button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -275,7 +354,7 @@ function Rate() {
   );
 }
 
-const VIEWS = [['overview', 'Vue d\'ensemble'], ['commissions', 'Commissions'], ['payouts', 'Versements'], ['rate', 'Taux de commission']];
+const VIEWS = [['overview', 'Vue d\'ensemble'], ['commissions', 'Commissions'], ['payouts', 'Versements'], ['refunds', 'Remboursements'], ['rate', 'Taux de commission']];
 
 // Finances : situation de la plateforme, écritures de commissions, versements aux livreurs, taux de commission.
 export default function AdminFinance() {
@@ -294,6 +373,7 @@ export default function AdminFinance() {
         {view === 'overview' && <Overview onNavigate={setView} />}
         {view === 'commissions' && <Commissions />}
         {view === 'payouts' && <Payouts />}
+        {view === 'refunds' && <Refunds />}
         {view === 'rate' && <Rate />}
       </div>
     </div>

@@ -5,6 +5,8 @@ const STATUS_MAP = {
   acceptee: { label: 'Acceptée par le livreur', color: 'bg-secondary-fixed text-on-secondary-fixed' },
   colis_recupere: { label: 'Colis récupéré', color: 'bg-primary-fixed text-on-primary-fixed-variant' },
   en_cours_livraison: { label: 'En route vers vous', color: 'bg-primary-container text-on-primary-container' },
+  remise: { label: 'Colis remis : à confirmer', color: 'bg-primary text-on-primary' },
+  a_payer: { label: 'À payer', color: 'bg-error-container text-on-error-container' },
   livree: { label: 'Livrée', color: 'bg-secondary-fixed text-on-secondary-fixed' },
   annulee: { label: 'Annulée', color: 'bg-surface-container text-on-surface-variant' },
   litige: { label: 'En litige', color: 'bg-error-container text-on-error-container' },
@@ -14,6 +16,7 @@ const STATUS_MAP = {
 const DELIVERER_LABELS = {
   acceptee: 'Acceptée',
   en_cours_livraison: 'En livraison',
+  remise: 'Remis : attente de confirmation',
 };
 
 export default function StatusBadge({ status, forDeliverer = false, className = '' }) {
@@ -24,4 +27,9 @@ export default function StatusBadge({ status, forDeliverer = false, className = 
       {label}
     </span>
   );
+}
+
+// Statut à afficher pour une livraison : tant qu'elle n'est pas payée, elle est « À payer » (invisible des livreurs).
+export function displayStatus(order) {
+  return order.awaiting_payment ? 'a_payer' : order.status;
 }

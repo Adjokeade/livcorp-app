@@ -121,7 +121,7 @@ class OrderCancellationTest extends TestCase
         $this->cancel($order, $client)->assertOk();
 
         $this->actingAs($client, 'sanctum')
-            ->postJson("/api/v1/client/orders/{$order->id}/payment", ['method' => 'especes'])
+            ->postJson("/api/v1/client/orders/{$order->id}/payment")
             ->assertUnprocessable();
     }
 

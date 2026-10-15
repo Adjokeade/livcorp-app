@@ -162,4 +162,27 @@ class AuthFlowTest extends TestCase
         $this->postJson('/api/v1/auth/login', $creds + ['category' => 'particulier'])->assertOk()->assertJsonStructure(['token']);
         $this->postJson('/api/v1/auth/login', $creds)->assertOk();
     }
+
+    public function test_email_verification_is_off_by_default_and_old_unverified_accounts_are_validated_on_login(): void
+    {
+        $this->assertFalse(config('app.email_verification_required'));
+
+        $this->postJson('/api/v1/auth/register', $this->particulier())->assertCreated();
+        User::where('email', 'awa@test.bj')->update(['email_verified_at' => null]); // compte inscrit avant ce choix
+        $creds = ['email' => 'awa@test.bj', 'password' => 'Passw0rdX'];
+
+        $this->postJson('/api/v1/auth/login', $creds)->assertOk();
+
+        $this->assertNotNull(User::where('email', 'awa@test.bj')->first()->email_verified_at);
+    }
+
+    public function test_when_verification_is_required_an_unverified_account_stays_unverified(): void
+    {
+        config(['app.email_verification_required' => true]);
+        $this->postJson('/api/v1/auth/register', $this->particulier())->assertCreated();
+
+        $this->postJson('/api/v1/auth/login', ['email' => 'awa@test.bj', 'password' => 'Passw0rdX'])->assertOk();
+
+        $this->assertNull(User::where('email', 'awa@test.bj')->first()->email_verified_at);
+    }
 }

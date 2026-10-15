@@ -39,7 +39,7 @@ class TeamAndFavoritesTest extends TestCase
             'pickup_address' => 'A', 'pickup_lat' => 6.36, 'pickup_lng' => 2.41, 'dropoff_address' => 'B', 'dropoff_lat' => 6.35,
             'dropoff_lng' => 2.36, 'recipient_name' => 'K', 'recipient_phone' => '1', 'distance_km' => 5, 'duration_min' => 10,
             'price' => 1000, 'price_suggested' => 1000, 'initial_price' => 1000, 'delivery_code' => '1234',
-            'status' => 'creee', 'payment_status' => 'en_attente']);
+            'status' => 'creee', 'payment_status' => 'paye']);
     }
 
     public function test_owner_creates_a_team_member_who_can_log_in(): void

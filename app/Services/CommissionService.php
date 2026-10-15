@@ -41,6 +41,8 @@ class CommissionService
             'deliverer_payout' => $earnings,
         ]);
 
+        // En ligne : LIV corp détient l'argent et doit le net au livreur. En espèces : le livreur a déjà encaissé 100 % du prix
+        // au retrait du colis, c'est lui qui doit sa commission à LIV corp (net négatif, déduit de ses prochains versements).
         $netAmount = $order->payment_method === 'especes' ? -$commissionAmount : $earnings;
 
         $commission = Commission::create([

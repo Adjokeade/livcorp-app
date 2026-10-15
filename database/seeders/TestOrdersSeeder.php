@@ -2,8 +2,10 @@
 
 namespace Database\Seeders;
 
+use App\Models\Commission;
 use App\Models\Deliverer;
 use App\Models\Order;
+use App\Models\Transaction;
 use App\Models\User;
 use App\Services\CommissionService;
 use App\Services\GeolocationService;
@@ -64,11 +66,21 @@ class TestOrdersSeeder extends Seeder
             [11, 'entreprise2', 'colis', 'express', 'haievive', 'cadjehoun', 2000, 'Médicaments (chaîne du froid)', 'creee', null, 'Pharmacie du Port'],
             [12, 'entreprise2', 'colis', 'standard', 'haievive', 'godomey', 3000, 'Matériel médical', 'en_cours_livraison', $d2, 'Clinique Saint-Luc'],
             [13, 'entreprise2', 'course', 'standard', 'haievive', 'zogbo', 2200, 'Récupérer une ordonnance et la livrer', 'colis_recupere', $d1, 'M. Agossou'],
+            // Colis remis (photo de réception envoyée) : l'expéditeur doit confirmer, l'argent est bloqué chez LIV corp.
+            [14, 'entreprise1', 'colis', 'standard', 'dantokpa', 'ganhi', 1500, 'Commande boutique n°1041', 'remise', $d2, 'Client Gnonlonfoun'],
+            // Livraison créée mais pas encore payée : invisible des livreurs, annulée au bout de 30 minutes.
+            [15, 'particulier2', 'colis', 'standard', 'zogbo', 'haievive', 1300, 'Chaussures', 'creee', null, 'Awa Adjovi'],
+            // Paiement en espèces : publiée sans paiement en ligne (n°16), puis acceptée, le livreur doit encaisser au retrait (n°17).
+            [16, 'particulier1', 'colis', 'standard', 'ganhi', 'cadjehoun', 1500, 'Panier de courses', 'creee', null, 'Mireille Tossou'],
+            [17, 'particulier2', 'colis', 'standard', 'fidjrosse', 'akpakpa', 2500, 'Matériel de bureau', 'acceptee', $d1, 'Sandrine Kiki'],
         ];
 
         foreach ($rows as [$n, $who, $type, $urgency, $from, $to, $price, $what, $status, $deliverer, $recipient]) {
             $reference = sprintf('LIV-TEST-%03d', $n);
-            if (Order::where('reference', $reference)->exists()) {
+            if ($existing = Order::where('reference', $reference)->first()) {
+                // Livraison de test créée avant le paiement d'avance : on lui donne son paiement, sans rien recréer.
+                $this->ensurePayment($existing, $n);
+
                 continue;
             }
 
@@ -88,7 +100,8 @@ class TestOrdersSeeder extends Seeder
                 'acceptee' => ['accepted_at' => now()->subMinutes(20)],
                 'colis_recupere' => ['accepted_at' => now()->subMinutes(40), 'picked_up_at' => now()->subMinutes(15)],
                 'en_cours_livraison' => ['accepted_at' => now()->subMinutes(50), 'picked_up_at' => now()->subMinutes(30)],
-                'livree' => ['accepted_at' => now()->subDay(), 'picked_up_at' => now()->subDay()->addMinutes(10), 'delivered_at' => now()->subDay()->addMinutes(35), 'payment_status' => 'paye', 'payment_method' => 'especes', 'paid_at' => now()->subDay()->addMinutes(35)],
+                'remise' => ['accepted_at' => now()->subHours(3), 'picked_up_at' => now()->subHours(2), 'handed_over_at' => now()->subHour()],
+                'livree' => ['accepted_at' => now()->subDay(), 'picked_up_at' => now()->subDay()->addMinutes(10), 'delivered_at' => now()->subDay()->addMinutes(35)],
                 'annulee' => ['cancelled_at' => now()->subHours(3)],
             ][$status];
 
@@ -107,15 +120,15 @@ class TestOrdersSeeder extends Seeder
                 'duration_min' => (int) round($km * 3 + 5),
                 'price' => $price, 'initial_price' => $price,
                 'price_suggested' => (int) $geo->estimatePrice($km, $urgency),
-                'delivery_code' => (string) random_int(1000, 9999),
                 'status' => $status,
                 'payment_status' => 'en_attente',
                 'created_at' => now()->subMinutes(5 + $n * 7),
             ], $times));
 
-            // Une livraison payée en ligne et une en espèces, pour voir les deux flux dans les finances.
-            if ($n === 10) {
-                $order->update(['payment_method' => 'en_ligne']);
+            $this->ensurePayment($order, $n);
+            if ($status === 'remise') {
+                $order->update(['delivery_photo_path' => 'deliveries/seed-'.$n.'.jpg']);
+                $this->placeholderPhoto('deliveries/seed-'.$n.'.jpg', 'Colis remis', $n);
             }
 
             $order->statusHistory()->create(['status' => 'creee', 'changed_by' => $client->id, 'note' => 'Commande créée']);
@@ -131,7 +144,54 @@ class TestOrdersSeeder extends Seeder
         Order::where('reference', 'like', 'LIV-TEST-%')->where('status', 'livree')->get()
             ->each(fn (Order $o) => app(CommissionService::class)->computeForDeliveredOrder($o));
 
-        $this->command->info('Livraisons de test prêtes (références LIV-TEST-001 à LIV-TEST-013).');
+        $this->command->info('Livraisons de test prêtes (références LIV-TEST-001 à LIV-TEST-017).');
+    }
+
+    /**
+     * Paiement d'avance d'une livraison de test : payée en ligne (transaction KKiaPay fictive), sauf la n°15 laissée à payer
+     * et la n°6 annulée, remboursée. Idempotent : une livraison déjà reliée à un paiement n'est pas touchée.
+     */
+    private function ensurePayment(Order $order, int $n): void
+    {
+        if ($order->transaction_id || $order->payment_method === 'especes') {
+            return;
+        }
+
+        $unpaid = $n === 15;
+        $refunded = $order->status === 'annulee';
+
+        // Livraison à payer en espèces au livreur : pas de paiement en ligne du tout.
+        if (in_array($n, [16, 17], true)) {
+            $order->update(['transaction_id' => null, 'payment_status' => 'en_attente', 'payment_method' => 'especes', 'delivery_code' => null]);
+
+            return;
+        }
+
+        $transaction = Transaction::create([
+            'order_id' => $order->id,
+            'user_id' => $order->client_id,
+            'provider' => 'kkiapay',
+            'reference' => sprintf('LIVP-TEST-%03d', $n),
+            'provider_transaction_id' => $unpaid ? null : sprintf('SEED-%03d', $n),
+            'method' => $unpaid ? null : 'mobile_money',
+            'amount' => $order->price,
+            'currency' => 'XOF',
+            'status' => $unpaid ? 'pending' : ($refunded ? 'refunded' : 'approved'),
+            'paid_at' => $unpaid ? null : $order->created_at,
+            'refund_status' => $refunded ? 'done' : null,
+        ]);
+
+        $order->update([
+            'transaction_id' => $transaction->id,
+            'payment_status' => $unpaid ? 'en_attente' : ($refunded ? 'rembourse' : 'paye'),
+            'payment_method' => $unpaid ? null : 'en_ligne',
+            'paid_at' => $unpaid ? null : $order->created_at,
+            'delivery_code' => null,
+        ]);
+
+        // Ancienne commission « espèces » (négative) d'une livraison de test : tout est désormais payé en ligne.
+        Commission::where('order_id', $order->id)->where('net_amount', '<', 0)->each(fn (Commission $c) => $c->update(['net_amount' => $c->order_amount - $c->commission_amount]));
+        $order->deliverer?->refreshStats();
     }
 
     /** Photo de colis de remplacement : fond coloré et numéro, enregistrée comme une vraie photo. */

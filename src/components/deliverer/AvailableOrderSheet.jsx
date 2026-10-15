@@ -27,7 +27,7 @@ export default function AvailableOrderSheet({ open, order, busy, unavailableReas
     ['Urgence', order.urgency === 'express' ? 'Express (prioritaire)' : 'Standard'],
     ['Description', order.package_type],
     ['Publiée', `${timeAgo(order.created_at)}${order.client_first_name ? ` par ${order.client_first_name}` : ''}`],
-    ['Paiement', 'À la réception, devant vous'],
+    ['Paiement', order.payment_method === 'especes' ? 'En espèces : vous encaissez le prix auprès de l\'expéditeur au retrait (votre commission est déduite de vos versements)' : 'Déjà payé par le client, versé après confirmation de réception'],
   ].filter(([, value]) => value);
 
   return (

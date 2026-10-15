@@ -9,7 +9,6 @@ use App\Models\Order;
 use App\Models\Payout;
 use App\Models\Review;
 use App\Services\AuditLogService;
-use App\Services\FedaPayService;
 use App\Services\OrderStatusService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
@@ -137,7 +136,7 @@ class ReviewsAndWalletTest extends TestCase
         $deliverer = $this->makeDeliverer();
         $order = $this->makeOrder($this->makeUser('client'), $deliverer, Order::STATUS_EN_COURS_LIVRAISON, 2000);
 
-        app(OrderStatusService::class)->transitionTo($order, Order::STATUS_LIVREE);
+        $this->completeDelivery($order);
 
         $deliverer->refresh();
         $this->assertSame('1700.00', $deliverer->wallet_balance); // 2000 - 15 %
@@ -150,8 +149,8 @@ class ReviewsAndWalletTest extends TestCase
         $order = $this->makeOrder($this->makeUser('client'), $deliverer, Order::STATUS_EN_COURS_LIVRAISON, 2000);
         $service = app(OrderStatusService::class);
 
-        $service->transitionTo($order, Order::STATUS_LIVREE);
-        $service->transitionTo($order->fresh(), Order::STATUS_LITIGE);
+        $delivered = $this->completeDelivery($order);
+        $service->transitionTo($delivered, Order::STATUS_LITIGE);
         $service->transitionTo($order->fresh(), Order::STATUS_LIVREE);
 
         $this->assertSame(1, Commission::count());
@@ -162,7 +161,7 @@ class ReviewsAndWalletTest extends TestCase
     {
         $deliverer = $this->makeDeliverer();
         $order = $this->makeOrder($this->makeUser('client'), $deliverer, Order::STATUS_EN_COURS_LIVRAISON, 2000);
-        app(OrderStatusService::class)->transitionTo($order, Order::STATUS_LIVREE);
+        $this->completeDelivery($order);
 
         $this->actingAs($deliverer->user, 'sanctum')
             ->getJson('/api/v1/deliverer/wallet')
@@ -202,39 +201,43 @@ class ReviewsAndWalletTest extends TestCase
     private function dueCommissionFor(Deliverer $deliverer): void
     {
         $order = $this->makeOrder($this->makeUser('client'), $deliverer, Order::STATUS_EN_COURS_LIVRAISON, 2000);
-        app(OrderStatusService::class)->transitionTo($order, Order::STATUS_LIVREE);
+        $this->completeDelivery($order);
     }
 
-    public function test_payout_job_pays_due_commissions_and_empties_the_wallet(): void
+    public function test_payout_job_prepares_a_pending_payout_without_paying_anything(): void
     {
         $deliverer = $this->makeDeliverer();
         $deliverer->update(['mobile_money_number' => '0146620583']);
         $this->dueCommissionFor($deliverer);
 
-        $this->mock(FedaPayService::class)->shouldReceive('createPayout')->once()->with('0146620583', 1700.0, \Mockery::any())->andReturn(['id' => 99]);
+        (new ProcessScheduledPayouts)->handle(app(AuditLogService::class));
 
-        (new ProcessScheduledPayouts)->handle(app(FedaPayService::class), app(AuditLogService::class));
-
-        $this->assertSame('paid', Payout::first()->status);
-        $this->assertSame('hebdomadaire', Payout::first()->period_type);
-        $this->assertSame('paid', Commission::first()->status);
-        $this->assertSame('0.00', $deliverer->fresh()->wallet_balance);
-    }
-
-    public function test_failed_payout_puts_commissions_back_in_the_queue(): void
-    {
-        $deliverer = $this->makeDeliverer();
-        $deliverer->update(['mobile_money_number' => '0146620583']);
-        $this->dueCommissionFor($deliverer);
-
-        $this->mock(FedaPayService::class)->shouldReceive('createPayout')->andThrow(new RuntimeException('KO'));
-
-        (new ProcessScheduledPayouts)->handle(app(FedaPayService::class), app(AuditLogService::class));
-
-        $this->assertSame('failed', Payout::first()->status);
-        $this->assertSame('due', Commission::first()->status);
-        $this->assertNull(Commission::first()->payout_id);
+        // KKiaPay ne verse pas à des tiers : le versement attend que l'administration le paie en Mobile Money.
+        $payout = Payout::first();
+        $this->assertSame('pending', $payout->status);
+        $this->assertSame('1700.00', $payout->total_amount);
+        $this->assertSame('0146620583', $payout->mobile_money_number);
+        $this->assertSame('hebdomadaire', $payout->period_type);
+        $this->assertSame('included_in_payout', Commission::first()->status);
+        $this->assertSame($payout->id, Commission::first()->payout_id);
+        // L'argent est encore dû au livreur tant que le versement n'est pas payé.
         $this->assertSame('1700.00', $deliverer->fresh()->wallet_balance);
+    }
+
+    public function test_a_second_run_adds_to_the_pending_payout_instead_of_creating_another(): void
+    {
+        $deliverer = $this->makeDeliverer();
+        $deliverer->update(['mobile_money_number' => '0146620583']);
+        $this->dueCommissionFor($deliverer);
+        (new ProcessScheduledPayouts)->handle(app(AuditLogService::class));
+
+        $this->dueCommissionFor($deliverer);
+        (new ProcessScheduledPayouts)->handle(app(AuditLogService::class));
+        (new ProcessScheduledPayouts)->handle(app(AuditLogService::class)); // rien de neuf : inchangé
+
+        $this->assertSame(1, Payout::count());
+        $this->assertSame('3400.00', Payout::first()->total_amount);
+        $this->assertSame(2, Commission::where('payout_id', Payout::first()->id)->count());
     }
 
     public function test_payout_is_skipped_without_a_mobile_money_number(): void
@@ -242,9 +245,7 @@ class ReviewsAndWalletTest extends TestCase
         $deliverer = $this->makeDeliverer();
         $this->dueCommissionFor($deliverer);
 
-        $this->mock(FedaPayService::class)->shouldNotReceive('createPayout');
-
-        (new ProcessScheduledPayouts)->handle(app(FedaPayService::class), app(AuditLogService::class));
+        (new ProcessScheduledPayouts)->handle(app(AuditLogService::class));
 
         $this->assertSame(0, Payout::count());
         $this->assertSame('due', Commission::first()->status);

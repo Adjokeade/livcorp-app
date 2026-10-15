@@ -35,6 +35,7 @@ class OrderStatusService
             $timestampField = match ($newStatus) {
                 Order::STATUS_ACCEPTEE => 'accepted_at',
                 Order::STATUS_COLIS_RECUPERE => 'picked_up_at',
+                Order::STATUS_REMISE => 'handed_over_at',
                 Order::STATUS_LIVREE => 'delivered_at',
                 Order::STATUS_ANNULEE => 'cancelled_at',
                 default => null,
@@ -68,7 +69,10 @@ class OrderStatusService
             broadcast(new OrderStatusChanged($order, $previousStatus))->toOthers();
 
             // E-mail personnalisé et chaleureux à chaque étape clé
-            $order->client->notify(new OrderStatusUpdatedForClient($order));
+            // « Remise » a sa propre notification (photo de réception à confirmer) : pas de doublon.
+            if ($newStatus !== Order::STATUS_REMISE) {
+                $order->client->notify(new OrderStatusUpdatedForClient($order));
+            }
 
             return $order->fresh();
         });

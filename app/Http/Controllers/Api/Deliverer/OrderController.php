@@ -35,8 +35,7 @@ class OrderController extends Controller
 
         // Gain estimé = prix moins la commission LIV corp. Le champ deliverer_payout, lui,
         // n'est rempli qu'à la livraison : il vaut 0 sur une course encore disponible.
-        return Order::where('status', Order::STATUS_CREEE)
-            ->whereNull('deliverer_id')
+        return Order::published()
             ->openTo($deliverer)
             ->whereDoesntHave('releases', fn ($q) => $q->where('deliverer_id', $deliverer->id))
             ->with(['client:id,first_name'])
@@ -79,7 +78,7 @@ class OrderController extends Controller
             // Verrou : deux livreurs qui touchent "Accepter" en même temps, ou un client qui annule au même
             // instant, ne doivent pas produire d'erreur ni de double attribution.
             $order = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
-            if ($order->status !== Order::STATUS_CREEE || $order->deliverer_id !== null) {
+            if ($order->status !== Order::STATUS_CREEE || $order->deliverer_id !== null || ($order->payment_status !== 'paye' && ! $order->isCash())) {
                 $taken = true;
 
                 return;
@@ -123,19 +122,15 @@ class OrderController extends Controller
 
         $validated = $request->validated();
 
-        // La remise se confirme avec le code du destinataire (DeliveryController::deliver), pas par un simple bouton.
-        if ($validated['status'] === Order::STATUS_LIVREE && $order->delivery_code !== null) {
-            return response()->json(['message' => 'Saisissez le code de remise donné par le destinataire.'], 422);
-        }
-
-        // Le client règle à la réception, devant le livreur : la course ne peut être
-        // clôturée qu'une fois ce paiement validé dans l'app.
-        if ($validated['status'] === Order::STATUS_LIVREE && ! $order->isPaid()) {
+        // Livraison payée en espèces : on ne récupère le colis qu'après avoir encaissé le prix auprès de l'expéditeur.
+        if ($validated['status'] === Order::STATUS_COLIS_RECUPERE && $order->isCash() && ! $order->isPaid()) {
             return response()->json([
-                'message' => 'Le paiement n\'est pas encore validé par le client.',
+                'message' => 'Encaissez d\'abord '.number_format((float) $order->price, 0, ',', ' ').' FCFA en espèces auprès de l\'expéditeur, puis confirmez-le avant de récupérer le colis.',
             ], 422);
         }
 
+        // Ici seulement le retrait puis le départ en livraison. La remise passe par la photo de réception
+        // (DeliveryController::deliver) et la livraison n'est « livrée » qu'à la confirmation de l'expéditeur.
         return $this->statusService->transitionTo($order, $validated['status'], $validated['note'] ?? null);
     }
 

@@ -6,9 +6,9 @@ use App\Http\Controllers\Controller;
 use App\Models\Dispute;
 use App\Models\Order;
 use App\Models\OrderRelease;
+use App\Notifications\CashCollected;
 use App\Notifications\DelivererArrived;
-use App\Notifications\DeliveryCodeLocked;
-use App\Notifications\DeliveryCodeReminder;
+use App\Notifications\DeliveryHandedOver;
 use App\Notifications\RecipientUnreachable;
 use App\Services\AuditLogService;
 use App\Services\GeolocationService;
@@ -17,12 +17,11 @@ use App\Services\OrderStatusService;
 use App\Services\ParcelPhotoService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Validation\Rule;
 
 /**
  * Le déroulé de la course côté livreur, au-delà des simples changements de statut :
- * signaler son arrivée, remettre le colis contre le code du destinataire, se désister avant le retrait,
+ * signaler son arrivée, remettre le colis (photo de réception), se désister avant le retrait,
  * déclarer un destinataire injoignable. Routes protégées par : auth:sanctum, role:livreur, verified.email,
  * deliverer.verified, plus la politique "updateStatus" (livreur assigné uniquement).
  */
@@ -47,6 +46,46 @@ class DeliveryController extends Controller
     private function present(Order $order): Order
     {
         return $order->fresh(['client:id,first_name,phone'])->maskContacts();
+    }
+
+    /**
+     * Livraison payée en espèces : le livreur confirme avoir encaissé le prix auprès de l'expéditeur, EN MAIN PROPRE, au
+     * retrait du colis. C'est la condition pour récupérer le colis. Il détient alors l'argent et doit sa commission à LIV corp
+     * (déduite de ses prochains versements).
+     */
+    public function cashCollected(Request $request, Order $order)
+    {
+        $this->authorize('updateStatus', $order);
+
+        if (! $order->isCash()) {
+            return response()->json(['message' => 'Cette livraison est payée en ligne : il n\'y a rien à encaisser.'], 422);
+        }
+
+        $outcome = DB::transaction(function () use ($order) {
+            $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+
+            if ($locked->status !== Order::STATUS_ACCEPTEE) {
+                return ['error' => 'Les espèces s\'encaissent au retrait du colis, avant de partir en livraison.'];
+            }
+            if ($locked->isPaid()) {
+                return ['order' => $locked, 'already' => true];
+            }
+
+            $locked->update(['payment_status' => 'paye', 'paid_at' => now()]);
+
+            return ['order' => $locked->fresh()];
+        });
+
+        if (isset($outcome['error'])) {
+            return response()->json(['message' => $outcome['error']], 422);
+        }
+
+        if (! isset($outcome['already'])) {
+            $this->auditLog->log('payment.cash_collected', $outcome['order'], ['amount' => $outcome['order']->price]);
+            rescue(fn () => $outcome['order']->client->notify(new CashCollected($outcome['order']->load('deliverer.user'))));
+        }
+
+        return response()->json(['order' => $this->present($outcome['order'])]);
     }
 
     /** "Je suis arrivé" au retrait ou à la destination, vérifié par la position quand elle est connue. */
@@ -95,106 +134,43 @@ class DeliveryController extends Controller
     }
 
     /**
-     * Remise du colis : le destinataire donne son code au livreur. C'est cette saisie (et la photo, pour les
-     * paiements en espèces) qui clôture la course et qui protège les deux parties d'un faux "livré".
+     * Remise du colis : le livreur envoie la photo de réception (obligatoire). La livraison passe en « remise » : l'argent
+     * reste bloqué chez LIV corp jusqu'à ce que l'EXPÉDITEUR confirme la réception (ou que le délai automatique s'écoule).
+     * Le destinataire n'a rien à faire ni besoin de l'application.
      */
     public function deliver(Request $request, Order $order)
     {
         $this->authorize('updateStatus', $order);
 
-        $validated = $request->validate([
-            'delivery_code' => 'nullable|digits:4',
-            'delivery_photo' => [
-                Rule::requiredIf($order->payment_method === 'especes'),
-                'nullable', 'image', 'mimes:jpg,jpeg,png,webp', 'max:8192',
-            ],
+        $request->validate([
+            'delivery_photo' => 'required|image|mimes:jpg,jpeg,png,webp|max:8192',
         ], [
-            'delivery_code.digits' => 'Le code de remise comporte 4 chiffres.',
-            'delivery_photo.required' => 'Prenez une photo du colis remis : elle est obligatoire pour un paiement en espèces.',
+            'delivery_photo.required' => 'Prenez une photo du colis remis : elle prouve la réception.',
+            'delivery_photo.image' => 'Le fichier doit être une photo.',
+            'delivery_photo.max' => 'Cette photo est trop lourde (8 Mo maximum).',
         ]);
 
-        if ($order->delivery_code !== null && empty($validated['delivery_code'])) {
-            return response()->json([
-                'message' => 'Saisissez le code de remise donné par le destinataire.',
-                'errors' => ['delivery_code' => ['Saisissez le code de remise donné par le destinataire.']],
-            ], 422);
-        }
-
-        $outcome = DB::transaction(function () use ($request, $order, $validated) {
+        $outcome = DB::transaction(function () use ($request, $order) {
             $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
 
             if ($locked->status !== Order::STATUS_EN_COURS_LIVRAISON) {
-                return ['error' => 'Cette course n\'est pas en cours de livraison.', 'status' => 422];
-            }
-            if (! $locked->isPaid()) {
-                return ['error' => 'Le paiement n\'est pas encore validé par le client.', 'status' => 422];
-            }
-            if ($locked->delivery_code_locked_until?->isFuture()) {
-                return ['error' => 'Trop de codes erronés. Réessayez dans '.max(1, (int) ceil(now()->diffInMinutes($locked->delivery_code_locked_until, true))).' min.', 'status' => 429];
+                return ['error' => 'Cette course n\'est pas en cours de livraison.'];
             }
 
-            if ($locked->delivery_code !== null && ! hash_equals($locked->delivery_code, (string) $validated['delivery_code'])) {
-                $attempts = $locked->delivery_code_attempts + 1;
-                $max = (int) config('services.orders.code_max_attempts');
-
-                if ($attempts >= $max) {
-                    $locked->forceFill(['delivery_code_attempts' => 0, 'delivery_code_locked_until' => now()->addMinutes((int) config('services.orders.code_lock_minutes'))])->save();
-
-                    return ['error' => 'Trop de codes erronés : la remise est bloquée '.config('services.orders.code_lock_minutes').' minutes.', 'status' => 429, 'locked' => true, 'order' => $locked];
-                }
-
-                $locked->forceFill(['delivery_code_attempts' => $attempts])->save();
-                $left = $max - $attempts;
-
-                $message = "Code incorrect. Il vous reste {$left} essai".($left > 1 ? 's' : '').'.';
-
-                return ['error' => $message, 'status' => 422, 'errors' => ['delivery_code' => [$message]]];
-            }
-
-            if ($request->hasFile('delivery_photo')) {
-                $locked->delivery_photo_path = $this->photos->store($request->file('delivery_photo'), 'deliveries');
-            }
-            $locked->forceFill(['delivery_code_attempts' => 0, 'delivery_code_locked_until' => null])->save();
-
-            $this->statusService->transitionTo(
-                $locked,
-                Order::STATUS_LIVREE,
-                $locked->delivery_code !== null ? 'Remise confirmée par le code du destinataire' : null,
-            );
+            $locked->delivery_photo_path = $this->photos->store($request->file('delivery_photo'), 'deliveries');
+            $this->statusService->transitionTo($locked, Order::STATUS_REMISE, 'Colis remis, photo de réception envoyée');
 
             return ['order' => $locked];
         });
 
         if (isset($outcome['error'])) {
-            if (($outcome['locked'] ?? false) === true) {
-                $this->auditLog->log('order.delivery_code_locked', $outcome['order']);
-                rescue(fn () => $outcome['order']->client->notify(new DeliveryCodeLocked($outcome['order'])));
-            }
-
-            return response()->json(array_filter(['message' => $outcome['error'], 'errors' => $outcome['errors'] ?? null]), $outcome['status']);
+            return response()->json(['message' => $outcome['error']], 422);
         }
+
+        $this->auditLog->log('order.handed_over', $outcome['order']);
+        rescue(fn () => $outcome['order']->client->notify(new DeliveryHandedOver($outcome['order']->fresh())));
 
         return response()->json(['order' => $this->present($outcome['order'])]);
-    }
-
-    /** Le destinataire a oublié son code : le livreur prévient le client, qui le retrouve dans l'application. */
-    public function remindCode(Request $request, Order $order)
-    {
-        $this->authorize('updateStatus', $order);
-
-        if ($order->status !== Order::STATUS_EN_COURS_LIVRAISON) {
-            return response()->json(['message' => 'Cette course n\'est pas en cours de livraison.'], 422);
-        }
-
-        $key = "code-reminder:{$order->id}";
-        if (RateLimiter::tooManyAttempts($key, 3)) {
-            return response()->json(['message' => 'Le client a déjà été prévenu plusieurs fois. Patientez quelques minutes.'], 429);
-        }
-        RateLimiter::hit($key, 600);
-
-        rescue(fn () => $order->client->notify(new DeliveryCodeReminder($order->load('deliverer.user'))));
-
-        return response()->json(['message' => 'Le client a été prévenu : il retrouve son code dans l\'application.']);
     }
 
     /**

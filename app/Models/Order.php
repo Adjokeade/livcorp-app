@@ -18,6 +18,8 @@ class Order extends Model
     public const STATUS_ACCEPTEE = 'acceptee';
     public const STATUS_COLIS_RECUPERE = 'colis_recupere';
     public const STATUS_EN_COURS_LIVRAISON = 'en_cours_livraison';
+    // Colis remis et photo de réception envoyée : l'argent reste bloqué jusqu'à la confirmation de l'expéditeur.
+    public const STATUS_REMISE = 'remise';
     public const STATUS_LIVREE = 'livree';
     public const STATUS_ANNULEE = 'annulee';
     public const STATUS_LITIGE = 'litige';
@@ -28,7 +30,9 @@ class Order extends Model
         // ACCEPTEE -> CREEE : désistement du livreur avant le retrait, la course repart en circulation.
         self::STATUS_ACCEPTEE => [self::STATUS_COLIS_RECUPERE, self::STATUS_ANNULEE, self::STATUS_CREEE],
         self::STATUS_COLIS_RECUPERE => [self::STATUS_EN_COURS_LIVRAISON, self::STATUS_LITIGE],
-        self::STATUS_EN_COURS_LIVRAISON => [self::STATUS_LIVREE, self::STATUS_LITIGE],
+        self::STATUS_EN_COURS_LIVRAISON => [self::STATUS_REMISE, self::STATUS_LITIGE],
+        // REMISE -> LIVREE : confirmation de l'expéditeur (ou automatique après le délai). REMISE -> LITIGE : problème signalé.
+        self::STATUS_REMISE => [self::STATUS_LIVREE, self::STATUS_LITIGE],
         self::STATUS_LIVREE => [self::STATUS_LITIGE],
         self::STATUS_ANNULEE => [],
         // LITIGE -> EN_COURS_LIVRAISON : nouvelle tentative de remise demandée par le client.
@@ -42,7 +46,7 @@ class Order extends Model
         'recipient_name', 'recipient_phone',
         'package_type', 'instructions', 'photo_path', 'urgency', 'distance_km', 'duration_min',
         'price', 'initial_price', 'price_suggested', 'commission_amount', 'deliverer_payout',
-        'status', 'payment_status', 'payment_method', 'paid_at',
+        'status', 'payment_status', 'payment_method', 'paid_at', 'handed_over_at', 'transaction_id',
         'pickup_arrived_at', 'dropoff_arrived_at', 'delivery_code', 'delivery_code_attempts', 'delivery_code_locked_until',
         'delivery_photo_path', 'failed_delivery_at', 'priority_until', 'priority_owner_id', 'client_hidden_at',
         'accepted_at', 'picked_up_at', 'delivered_at', 'cancelled_at',
@@ -62,7 +66,7 @@ class Order extends Model
     // de la bouche du destinataire. Le chemin de la photo de remise reste interne comme celui de la photo du colis.
     protected $hidden = ['photo_path', 'delivery_code', 'delivery_code_attempts', 'delivery_code_locked_until', 'delivery_photo_path', 'priority_owner_id'];
 
-    protected $appends = ['photo_url', 'delivery_photo_url'];
+    protected $appends = ['photo_url', 'delivery_photo_url', 'auto_confirm_at', 'awaiting_payment'];
 
     /**
      * URL signée de la photo du colis, valable quelques heures. L'expiration est calée sur
@@ -88,7 +92,7 @@ class Order extends Model
             'pickup_arrived_at' => 'datetime', 'dropoff_arrived_at' => 'datetime',
             'delivery_code_locked_until' => 'datetime', 'failed_delivery_at' => 'datetime',
             'price' => 'decimal:2', 'initial_price' => 'decimal:2', 'price_suggested' => 'decimal:2', 'commission_amount' => 'decimal:2', 'deliverer_payout' => 'decimal:2',
-            'priority_until' => 'datetime', 'client_hidden_at' => 'datetime',
+            'priority_until' => 'datetime', 'client_hidden_at' => 'datetime', 'handed_over_at' => 'datetime',
             'accepted_at' => 'datetime', 'picked_up_at' => 'datetime',
             'delivered_at' => 'datetime', 'cancelled_at' => 'datetime', 'paid_at' => 'datetime',
         ];
@@ -106,6 +110,28 @@ class Order extends Model
             ->orWhereExists(fn ($f) => $f->selectRaw('1')->from('favorite_deliverers')
                 ->whereColumn('favorite_deliverers.user_id', 'orders.priority_owner_id')
                 ->where('favorite_deliverers.deliverer_id', $deliverer->id)));
+    }
+
+    /**
+     * Livraisons publiées : pas encore prises, et soit payées en ligne (argent bloqué chez LIV corp jusqu'à la confirmation
+     * de réception), soit à payer en espèces au livreur. Une livraison en attente de paiement en ligne n'est jamais montrée.
+     */
+    public function scopePublished($query)
+    {
+        return $query->where('status', self::STATUS_CREEE)->whereNull('deliverer_id')
+            ->where(fn ($q) => $q->where('payment_status', 'paye')->orWhere('payment_method', 'especes'));
+    }
+
+    /** Livraison à payer en espèces : pas de paiement en ligne, le livreur encaisse au retrait du colis. */
+    public function isCash(): bool
+    {
+        return $this->payment_method === 'especes';
+    }
+
+    /** Créée mais en attente d'un paiement EN LIGNE : invisible des livreurs tant qu'il n'est pas fait. */
+    public function getAwaitingPaymentAttribute(): bool
+    {
+        return $this->status === self::STATUS_CREEE && $this->payment_status !== 'paye' && ! $this->isCash();
     }
 
     public function isOpenTo(Deliverer $deliverer): bool
@@ -144,10 +170,20 @@ class Order extends Model
         return URL::temporarySignedRoute('orders.delivery-photo', now()->startOfHour()->addHours(6), ['order' => $this->id]);
     }
 
+    /** Moment où la réception sera confirmée d'office si l'expéditeur ne répond pas (colis remis, en attente de confirmation). */
+    public function getAutoConfirmAtAttribute(): ?string
+    {
+        if ($this->status !== self::STATUS_REMISE || ! $this->handed_over_at) {
+            return null;
+        }
+
+        return $this->handed_over_at->copy()->addHours((int) config('services.orders.auto_confirm_hours'))->toIso8601String();
+    }
+
     /** Course en cours : le livreur est engagé, contacts et conversation sont ouverts. */
     public function isActive(): bool
     {
-        return in_array($this->status, [self::STATUS_ACCEPTEE, self::STATUS_COLIS_RECUPERE, self::STATUS_EN_COURS_LIVRAISON, self::STATUS_LITIGE], true);
+        return in_array($this->status, [self::STATUS_ACCEPTEE, self::STATUS_COLIS_RECUPERE, self::STATUS_EN_COURS_LIVRAISON, self::STATUS_REMISE, self::STATUS_LITIGE], true);
     }
 
     /**
@@ -185,6 +221,8 @@ class Order extends Model
     public function trackingPoints(): HasMany { return $this->hasMany(TrackingPoint::class); }
     public function transaction(): HasOne { return $this->hasOne(Transaction::class)->latestOfMany(); }
     public function transactions(): HasMany { return $this->hasMany(Transaction::class); }
+    /** Paiement qui couvre cette livraison (peut en couvrir plusieurs : envoi en lot). */
+    public function payment(): BelongsTo { return $this->belongsTo(Transaction::class, 'transaction_id'); }
     public function review(): HasOne { return $this->hasOne(Review::class); }
     public function disputes(): HasMany { return $this->hasMany(Dispute::class); }
     public function commissions(): HasMany { return $this->hasMany(Commission::class); }

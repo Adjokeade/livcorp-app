@@ -55,7 +55,7 @@ export default function LiveTrackingCard({ order, tracking }) {
             <p className="mt-0.5 text-sm text-on-surface-variant">
               {toPickup
                 ? `Il récupère le colis${waitedMin > 0 ? ` (sur place depuis ${waitedMin} min)` : ''}.`
-                : `Sur place depuis ${waitedMin > 0 ? `${waitedMin} min` : 'un instant'}. Donnez-lui votre code de remise.`}
+                : `Sur place depuis ${waitedMin > 0 ? `${waitedMin} min` : 'un instant'}. Il remet le colis au destinataire et vous envoie la photo de réception.`}
             </p>
           )}
           <p className="mt-1.5 flex items-center gap-2 text-xs">

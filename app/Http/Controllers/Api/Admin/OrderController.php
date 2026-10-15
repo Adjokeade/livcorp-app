@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api\Admin;
 use App\Http\Controllers\Controller;
 use App\Models\Order;
 use App\Services\AuditLogService;
+use App\Services\OnlinePaymentService;
 use App\Services\OrderStatusService;
 use Illuminate\Http\Request;
 
@@ -14,13 +15,14 @@ class OrderController extends Controller
     public function __construct(
         private readonly OrderStatusService $statusService,
         private readonly AuditLogService $auditLog,
+        private readonly OnlinePaymentService $payments,
     ) {}
 
     public function index(Request $request)
     {
         $filters = $request->validate([
             'q' => 'nullable|string|max:100',
-            'status' => 'nullable|in:creee,acceptee,colis_recupere,en_cours_livraison,livree,annulee,litige',
+            'status' => 'nullable|in:creee,acceptee,colis_recupere,en_cours_livraison,remise,livree,annulee,litige',
         ]);
 
         return Order::query()
@@ -43,6 +45,7 @@ class OrderController extends Controller
                 'payment_status' => $o->payment_status,
                 'price' => $o->price,
                 'price_suggested' => $o->price_suggested,
+                'handed_over_at' => $o->handed_over_at,
                 'distance_km' => $o->distance_km,
                 'pickup_address' => $o->pickup_address,
                 'dropoff_address' => $o->dropoff_address,
@@ -65,6 +68,10 @@ class OrderController extends Controller
         $this->statusService->transitionTo($order, Order::STATUS_ANNULEE, 'Annulée par LIV corp : '.$validated['reason']);
         $this->auditLog->log('admin.order.cancelled', $order, ['reason' => $validated['reason']]);
 
-        return response()->json(['status' => $order->fresh()->status]);
+        // L'argent bloqué chez LIV corp est rendu au client.
+        $this->payments->cancelUnpaid($order);
+        $refund = $this->payments->refundOrder($order->fresh(), 'Annulée par LIV corp : '.$validated['reason']);
+
+        return response()->json(['status' => $order->fresh()->status, 'refund' => $refund]);
     }
 }

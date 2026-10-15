@@ -70,7 +70,7 @@ function Hero() {
           </h1>
           <p className="mt-5 text-lg text-on-surface-variant motion-safe:animate-fade-up" style={enter(140)}>
             La plateforme qui connecte particuliers, entreprises et livreurs vérifiés : suivi en temps réel,
-            paiement à la réception, du départ jusqu'à la remise en main propre.
+            paiement en ligne sécurisé ou en espèces.
           </p>
 
           <form className="mt-8 flex flex-col gap-3 motion-safe:animate-fade-up sm:flex-row" style={enter(280)} onSubmit={handleSearch}>
@@ -104,8 +104,8 @@ function Hero() {
               <span className="relative">✓</span>
             </span>
             <div>
-              <p className="text-sm font-semibold text-on-surface">Paiement à la réception</p>
-              <p className="text-xs text-on-surface-variant">Mobile Money, carte ou espèces, devant le livreur</p>
+              <p className="text-sm font-semibold text-on-surface">Paiement au choix</p>
+              <p className="text-xs text-on-surface-variant">Mobile Money, carte (bloqué jusqu'à la réception) ou espèces</p>
             </div>
           </div>
         </div>

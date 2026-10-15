@@ -93,7 +93,9 @@ export default function CancelOrderCard({ order, delivererName, onCancelled, com
           {order.status === 'acceptee'
             ? `${delivererName ?? 'Votre livreur'} a déjà accepté votre course : il sera prévenu tout de suite.`
             : "Aucun livreur n'a encore accepté votre course."}{' '}
-          Rien n'est à payer : le règlement se fait à la réception du colis.
+          {order.payment_status === 'paye'
+            ? 'Vous êtes remboursé du montant payé (Mobile Money : en général tout de suite ; carte : notre équipe vous recontacte).'
+            : "Rien n'a été débité."}
         </p>
 
         <fieldset className="mt-4">

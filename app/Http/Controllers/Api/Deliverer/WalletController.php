@@ -35,6 +35,8 @@ class WalletController extends Controller
             'total_paid' => (float) (clone $commissions)->where('status', 'paid')->where('net_amount', '>', 0)->sum('net_amount'),
             // Espèces encaissées auprès des clients : le livreur les détient déjà.
             'cash_collected' => (float) (clone $commissions)->where('net_amount', '<', 0)->sum('order_amount'),
+            // Colis remis dont l'expéditeur n'a pas encore confirmé la réception : l'argent est bloqué chez LIV corp.
+            'pending_confirmation' => round((float) $deliverer->orders()->where('status', 'remise')->sum('price') * (1 - \App\Services\FinanceSettings::commissionRate() / 100), 2),
             'commission_rate' => \App\Services\FinanceSettings::commissionRate(),
             'mobile_money_number' => $deliverer->mobile_money_number,
             'earnings' => (clone $commissions)
@@ -64,7 +66,7 @@ class WalletController extends Controller
     /**
      * Enregistre le numéro qui recevra les versements. Accepte les formats de
      * saisie courants (+229 01 46 62 05 83, 0146620583, 229 61 23 45 67…) et
-     * stocke le numéro national, car FedaPay reçoit le pays à part (cf. createPayout).
+     * stocke le numéro national : c'est celui que l'administration utilise pour payer le versement en Mobile Money.
      */
     public function updateMobileMoney(Request $request)
     {

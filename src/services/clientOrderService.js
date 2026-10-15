@@ -37,6 +37,7 @@ const clientOrderService = {
     add('instructions', draft.instructions);
     add('urgency', draft.urgency);
     if (draft.favoritesFirst) add('favorites_first', 1);
+    add('payment_method', draft.paymentMethod);
     if (draft.photo) form.append('photo', draft.photo);
     return api.post('/client/orders', form).then((r) => r.data); // { order }
   },
@@ -59,7 +60,8 @@ const clientOrderService = {
   deleteRecipient: (id) => api.delete(`/client/recipients/${id}`),
 
   // Envoi en lot (entreprises) : un point de départ commun, une livraison par ligne. Tout ou rien.
-  createBatch: (pickup, rows, { favoritesFirst = false } = {}) => {
+  // Répond { orders, payment } : un seul paiement couvre tout l'envoi (à ouvrir dans le widget KKiaPay).
+  createBatch: (pickup, rows, { favoritesFirst = false, paymentMethod = 'en_ligne' } = {}) => {
     const form = new FormData();
     const add = (key, value) => {
       if (value !== null && value !== undefined && value !== '') form.append(key, value);
@@ -69,6 +71,7 @@ const clientOrderService = {
     add('pickup_lng', pickup.lng);
     add('pickup_details', pickup.details?.trim());
     if (favoritesFirst) add('favorites_first', 1);
+    add('payment_method', paymentMethod);
     rows.forEach((row, i) => {
       const k = (field) => `orders[${i}][${field}]`;
       add(k('type'), row.type);
@@ -81,7 +84,7 @@ const clientOrderService = {
       add(k('package_type'), row.packageType);
       if (row.photo) form.append(k('photo'), row.photo);
     });
-    return api.post('/client/orders/batch', form).then((r) => r.data.orders);
+    return api.post('/client/orders/batch', form).then((r) => r.data);
   },
 
   show: (orderId) => api.get(`/client/orders/${orderId}`).then((r) => r.data),
@@ -95,9 +98,20 @@ const clientOrderService = {
   // Après un "destinataire injoignable" : le client confirme qu'il est joignable, la remise reprend.
   retryDelivery: (orderId) => api.post(`/client/orders/${orderId}/retry-delivery`).then((r) => r.data.order),
 
-  // Validation du paiement à la réception : method = 'especes' | 'en_ligne'.
-  // 'en_ligne' renvoie aussi { payment } (transaction FedaPay à ouvrir dans le widget).
-  pay: (orderId, method) => api.post(`/client/orders/${orderId}/payment`, { method }).then((r) => r.data),
+  // Paiement à la CRÉATION : l'argent reste bloqué chez LIV corp jusqu'à la confirmation de réception.
+  // Reprise du paiement d'une livraison non payée : renvoie { order, payment } (de quoi ouvrir le widget KKiaPay).
+  pay: (orderId) => api.post(`/client/orders/${orderId}/payment`).then((r) => r.data),
+
+  // Retour du widget : le serveur vérifie la transaction auprès de KKiaPay avant de publier la livraison.
+  // Répond { status: 'approved' | 'failed' | 'pending', orders } ; 'pending' = confirmation à venir par webhook.
+  confirmPayment: (reference, transactionId) =>
+    api.post('/client/payments/confirm', { reference, transaction_id: transactionId }).then((r) => r.data),
+
+  // Réception : le livreur a remis le colis et envoyé la photo ; l'expéditeur confirme (argent versé au livreur)
+  // ou signale un problème (litige, argent gardé chez LIV corp). reason ∈ colis_endommage | colis_non_livre | autre.
+  confirmDelivery: (orderId) => api.post(`/client/orders/${orderId}/confirm-delivery`).then((r) => r.data.order),
+  reportProblem: (orderId, { reason, description }) =>
+    api.post(`/client/orders/${orderId}/report-problem`, { reason, description }).then((r) => r.data.order),
 
   // Avis sur une commande livrée : { rating: 1..5, comment? }, une seule fois par commande.
   review: (orderId, { rating, comment }) =>

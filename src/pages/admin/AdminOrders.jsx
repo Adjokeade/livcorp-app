@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react';
 import adminService from '../../services/adminService';
-import StatusBadge from '../../components/common/StatusBadge';
+import StatusBadge, { displayStatus } from '../../components/common/StatusBadge';
 import Sheet from '../../components/common/Sheet';
 import Button from '../../components/common/Button';
 import { formatDate, formatFcfa, formatKm, shortPlace } from '../../lib/format';
 import { Badge, Pager, SearchInput, Select, useDebounced } from './adminUi';
 import { Loading } from './AdminBackOffice';
 
-const STATUSES = [['', 'Tous les statuts'], ['creee', 'En attente'], ['acceptee', 'Acceptées'], ['colis_recupere', 'Colis récupéré'], ['en_cours_livraison', 'En livraison'], ['livree', 'Livrées'], ['annulee', 'Annulées'], ['litige', 'En litige']];
+const STATUSES = [['', 'Tous les statuts'], ['creee', 'En attente'], ['acceptee', 'Acceptées'], ['colis_recupere', 'Colis récupéré'], ['en_cours_livraison', 'En livraison'], ['remise', 'Remis, à confirmer'], ['livree', 'Livrées'], ['annulee', 'Annulées'], ['litige', 'En litige']];
 const CANCELLABLE = ['creee', 'acceptee', 'litige'];
 
 function CancelSheet({ order, onClose, onDone }) {
@@ -98,7 +98,7 @@ export default function AdminOrders() {
                   </p>
                 </div>
                 <div className="flex flex-col items-end gap-1.5">
-                  <StatusBadge status={o.status} />
+                  <StatusBadge status={displayStatus(o)} />
                   <p className="font-display text-lg font-bold text-primary">{formatFcfa(o.price)}</p>
                   {Number(o.price_suggested) > 0 && Number(o.price) !== Number(o.price_suggested) && (
                     <Badge tone="warn">Barème : {formatFcfa(o.price_suggested)}</Badge>

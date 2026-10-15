@@ -22,6 +22,7 @@ const INITIAL = {
   instructions: '',
   urgency: 'standard', // 'standard' | 'express'
   favoritesFirst: false, // proposer d'abord aux livreurs favoris
+  paymentMethod: 'en_ligne', // 'en_ligne' (payé tout de suite) | 'especes' (remis au livreur au retrait)
   photo: null, // File (déjà réduit par PhotoField)
   price: '', // FCFA, fixé par le client
   estimate: null, // { distance_km, duration_min, distance_source, route, suggested_prices, min_price }

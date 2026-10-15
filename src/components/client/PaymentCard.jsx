@@ -1,141 +1,145 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import clientOrderService from '../../services/clientOrderService';
-import { loadFedaPayCheckout } from '../../lib/loadFedaPayCheckout';
+import { openKkiapayPayment } from '../../lib/loadKkiapay';
 import { formatFcfa } from '../../lib/format';
 import Button from '../common/Button';
 import Card from '../common/Card';
 
-// Paiement à la réception : le client le valide dans l'app, devant le livreur, qui en voit
-// aussitôt le statut. Deux modes : en ligne (FedaPay) ou en espèces (confirmation du client).
-// Le parent relit la commande toutes les quelques secondes : c'est lui qui bascule cette carte
-// sur "Paiement validé" (confirmation FedaPay par webhook comprise).
-export default function PaymentCard({ order, delivererName, onPaid }) {
-  const [busy, setBusy] = useState(null); // 'especes' | 'en_ligne'
-  const [confirmingCash, setConfirmingCash] = useState(false);
-  const [awaitingOnline, setAwaitingOnline] = useState(false);
+// Paiement à la CRÉATION : la livraison n'est publiée aux livreurs qu'une fois payée (Mobile Money ou carte, via
+// KKiaPay). L'argent reste bloqué chez LIV corp jusqu'à ce que l'expéditeur confirme la réception, puis il devient un
+// solde pour le livreur. Cette carte propose de payer tant que ce n'est pas fait, puis explique où est l'argent.
+export default function PaymentCard({ order, delivererName, onPaid, autoPay = false }) {
+  const [busy, setBusy] = useState(false);
+  const [awaiting, setAwaiting] = useState(false);
   const [error, setError] = useState('');
+  const autoStarted = useRef(false);
+  const onPaidRef = useRef(onPaid);
+  onPaidRef.current = onPaid;
 
   const amount = formatFcfa(order.price);
-  const who = delivererName ?? 'votre livreur';
+  const unpaid = Boolean(order.awaiting_payment); // en attente d'un paiement EN LIGNE (les espèces ne s'attendent pas)
+  const who = delivererName ?? 'le livreur';
 
-  if (order.payment_status === 'paye') {
-    return (
-      <Card>
-        <h2 className="font-display text-lg font-bold text-primary">Paiement validé</h2>
-        <p className="mt-1 text-sm text-on-surface-variant">
-          {amount} réglés {order.payment_method === 'especes' ? 'en espèces' : 'en ligne'}.
-          {order.status === 'livree' ? '' : ' Votre livreur peut finaliser la livraison.'}
-        </p>
-      </Card>
-    );
-  }
-
-  // Avant que le livreur soit en route : on annonce simplement la règle.
-  if (order.status !== 'en_cours_livraison') {
-    return (
-      <Card>
-        <h2 className="text-sm font-semibold text-on-surface-variant">PAIEMENT À LA RÉCEPTION</h2>
-        <p className="mt-2 text-sm">
-          Vous réglerez <strong>{amount}</strong> à la remise du colis, devant votre livreur : Mobile Money, carte ou
-          espèces. Rien à payer maintenant.
-        </p>
-      </Card>
-    );
-  }
-
-  async function payCash() {
-    setBusy('especes');
-    setError('');
+  async function confirmWithServer(reference, transactionId) {
+    setAwaiting(true);
     try {
-      const { order: paid } = await clientOrderService.pay(order.id, 'especes');
-      onPaid(paid);
+      const result = await clientOrderService.confirmPayment(reference, transactionId);
+      if (result.status === 'approved') {
+        setAwaiting(false);
+        onPaidRef.current({ payment_status: 'paye' });
+      } else if (result.status === 'failed') {
+        setAwaiting(false);
+        setError("Le paiement n'a pas abouti. Vous pouvez réessayer.");
+      }
+      // 'pending' : « confirmation en cours », la page se met à jour dès que KKiaPay confirme (webhook).
     } catch (err) {
-      setError(err.response?.data?.message ?? "Impossible de valider le paiement. Réessayez.");
-    } finally {
-      setBusy(null);
-      setConfirmingCash(false);
+      setAwaiting(false);
+      setError(err.response?.data?.errors?.transaction_id?.[0] ?? err.response?.data?.message ?? 'Impossible de confirmer le paiement. Contactez-nous si vous avez été débité.');
     }
   }
 
-  async function payOnline() {
-    setBusy('en_ligne');
+  async function pay() {
+    setBusy(true);
     setError('');
     try {
-      const { payment } = await clientOrderService.pay(order.id, 'en_ligne');
-      const FedaPay = await loadFedaPayCheckout();
-      FedaPay.init({
-        public_key: import.meta.env.VITE_FEDAPAY_PUBLIC_KEY,
-        transaction: {
-          id: payment.fedapay_transaction_id,
-          amount: Number(order.price),
-          description: `Commande LIV corp #${order.reference}`,
-        },
-        onComplete(response) {
-          if (response.reason === FedaPay.CHECKOUT_COMPLETED) setAwaitingOnline(true);
-        },
-      }).open();
+      const { payment } = await clientOrderService.pay(order.id);
+      await openKkiapayPayment(payment, {
+        onSuccess: (transactionId) => confirmWithServer(payment.reference, transactionId),
+        onFailed: () => setError('Le paiement a échoué ou a été annulé. Vous pouvez réessayer.'),
+      });
     } catch (err) {
       setError(err.response?.data?.message ?? err.message ?? 'Le paiement en ligne est indisponible.');
     } finally {
-      setBusy(null);
+      setBusy(false);
     }
   }
 
+  // Juste après la création d'une livraison, le widget s'ouvre tout seul (une seule fois).
+  useEffect(() => {
+    if (autoPay && unpaid && !autoStarted.current) {
+      autoStarted.current = true;
+      pay();
+    }
+  }, [autoPay, unpaid]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (unpaid) {
+    return (
+      <Card className="border-2 border-primary">
+        <h2 className="font-display text-lg font-bold">Payez pour publier votre livraison</h2>
+        <p className="mt-1 text-sm text-on-surface-variant">
+          Tant qu'elle n'est pas payée, aucun livreur ne la voit. Montant : <strong className="text-on-surface">{amount}</strong>, par Mobile Money ou carte.
+        </p>
+        <p className="mt-2 rounded bg-primary-fixed px-3 py-2 text-xs text-on-primary-fixed-variant">
+          Votre argent reste bloqué en sécurité chez LIV corp. Le livreur n'est payé qu'après la confirmation de la réception du colis, et vous êtes remboursé si la livraison est annulée.
+        </p>
+
+        {order.payment_status === 'echoue' && !error && (
+          <p className="mt-3 rounded bg-error-container px-3 py-2 text-sm text-on-error-container">Le dernier paiement n'a pas abouti. Réessayez.</p>
+        )}
+        {awaiting && (
+          <p role="status" className="mt-3 rounded bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">
+            Paiement envoyé, confirmation en cours… Cette page se met à jour toute seule.
+          </p>
+        )}
+        {error && <p role="alert" className="mt-3 rounded bg-error-container px-3 py-2 text-sm text-on-error-container">{error}</p>}
+
+        <Button onClick={pay} disabled={busy || awaiting} className="mt-4 w-full">
+          {busy ? 'Ouverture…' : `Payer ${amount}`}
+        </Button>
+      </Card>
+    );
+  }
+
+  // Paiement en espèces : remis au livreur au retrait du colis, qui le confirme dans l'application.
+  if (order.payment_method === 'especes' && order.status !== 'annulee') {
+    return order.payment_status === 'paye' ? (
+      <Card>
+        <h2 className="text-sm font-semibold text-on-surface-variant">PAIEMENT EN ESPÈCES</h2>
+        <p className="mt-2 text-sm">
+          <strong>{amount}</strong> remis en espèces à {who}, qui a confirmé les avoir reçus. Rien d'autre à payer.
+        </p>
+      </Card>
+    ) : (
+      <Card className="border-2 border-primary">
+        <h2 className="font-display text-lg font-bold">À payer en espèces au livreur</h2>
+        <p className="mt-1 text-sm">
+          Remettez <strong>{amount}</strong> à {who}, <strong>en main propre, quand il vient récupérer le colis</strong>. Il le confirmera dans l'application avant de partir avec votre colis.
+        </p>
+        <p className="mt-2 rounded bg-primary-fixed px-3 py-2 text-xs text-on-primary-fixed-variant">
+          Ne payez qu'au livreur de cette livraison, et uniquement une fois qu'il est devant vous. Vous recevrez une notification quand il aura confirmé l'encaissement.
+        </p>
+      </Card>
+    );
+  }
+
+  if (order.payment_status === 'rembourse') {
+    return (
+      <Card>
+        <h2 className="font-display text-lg font-bold">Paiement remboursé</h2>
+        <p className="mt-1 text-sm text-on-surface-variant">Les {amount} que vous aviez payés vous sont rendus. Si vous ne les voyez pas sous quelques jours, contactez-nous.</p>
+      </Card>
+    );
+  }
+
+  if (order.payment_status !== 'paye') return null;
+
+  if (order.status === 'livree') {
+    return (
+      <Card>
+        <h2 className="font-display text-lg font-bold text-primary">Livraison terminée</h2>
+        <p className="mt-1 text-sm text-on-surface-variant">{amount} réglés. Réception confirmée : votre livreur a été payé.</p>
+      </Card>
+    );
+  }
+
+  if (order.status === 'annulee') return null;
+
   return (
     <Card>
-      <h2 className="font-display text-lg font-bold">Validez le paiement</h2>
-      <p className="mt-1 text-sm text-on-surface-variant">
-        {who} est en route. À la remise du colis, réglez <strong className="text-on-surface">{amount}</strong> devant
-        {who === 'votre livreur' ? ' lui' : ` ${who}`} : il voit le statut immédiatement.
+      <h2 className="text-sm font-semibold text-on-surface-variant">PAIEMENT SÉCURISÉ</h2>
+      <p className="mt-2 text-sm">
+        <strong>{amount}</strong> payés, bloqués chez LIV corp. Votre livreur ne les reçoit qu'<strong>après votre confirmation de réception</strong> du colis.
       </p>
-
-      {order.payment_status === 'echoue' && (
-        <p className="mt-3 rounded bg-error-container px-3 py-2 text-sm text-on-error-container">
-          Le dernier paiement en ligne a échoué. Réessayez ou payez en espèces.
-        </p>
-      )}
-
-      {awaitingOnline && (
-        <p role="status" className="mt-3 rounded bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">
-          Paiement envoyé, confirmation en cours… Cette page se met à jour toute seule.
-        </p>
-      )}
-
-      {error && (
-        <p role="alert" className="mt-3 rounded bg-error-container px-3 py-2 text-sm text-on-error-container">
-          {error}
-        </p>
-      )}
-
-      {confirmingCash ? (
-        <div className="mt-4 rounded border border-outline-variant p-3">
-          <p className="text-sm font-semibold">
-            Confirmez-vous avoir remis {amount} en espèces à {who} ?
-          </p>
-          <div className="mt-3 flex gap-2">
-            <Button variant="secondary" onClick={() => setConfirmingCash(false)} disabled={busy !== null} className="flex-1">
-              Pas encore
-            </Button>
-            <Button onClick={payCash} disabled={busy !== null} className="flex-1">
-              {busy === 'especes' ? 'Validation…' : 'Oui, valider'}
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-4 flex flex-col gap-2">
-          <Button onClick={payOnline} disabled={busy !== null || awaitingOnline} className="w-full">
-            {busy === 'en_ligne' ? 'Ouverture…' : 'Payer par Mobile Money ou carte'}
-          </Button>
-          <Button
-            variant="secondary"
-            onClick={() => setConfirmingCash(true)}
-            disabled={busy !== null || awaitingOnline}
-            className="w-full"
-          >
-            Je paie en espèces
-          </Button>
-        </div>
-      )}
     </Card>
   );
 }

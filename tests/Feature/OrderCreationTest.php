@@ -18,6 +18,12 @@ class OrderCreationTest extends TestCase
     use BuildsPlatformData;
     use RefreshDatabase;
 
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->configureKkiapay(); // sans clés KKiaPay, une livraison ne peut pas être créée (elle se paie à la création)
+    }
+
     private function fakeOsrm(): void
     {
         Http::fake(['*' => Http::response(['code' => 'Ok', 'routes' => [[

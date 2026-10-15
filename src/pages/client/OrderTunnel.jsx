@@ -12,6 +12,7 @@ import AddressField from '../../components/client/AddressField';
 import RouteMap from '../../components/client/RouteMap';
 import PhotoField from '../../components/client/PhotoField';
 import FavoritesFirstOption from '../../components/client/FavoritesFirstOption';
+import PaymentMethodPicker from '../../components/client/PaymentMethodPicker';
 import PhotoViewer from '../../components/common/PhotoViewer';
 
 // Tunnel de commande client en trois étapes : trajet (adresses localisées sur une carte),
@@ -35,7 +36,6 @@ export default function OrderTunnel() {
   const [estimateError, setEstimateError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState('');
-  const [order, setOrder] = useState(null);
   const [savedAddresses, setSavedAddresses] = useState([]);
   const [recipients, setRecipients] = useState([]);
 
@@ -134,8 +134,12 @@ export default function OrderTunnel() {
     setCreating(true);
     setError('');
     try {
+      // En ligne : la livraison est créée NON payée (invisible des livreurs) et la page de suivi ouvre aussitôt le paiement.
+      // En espèces : elle est publiée tout de suite, le livreur encaissera au retrait du colis.
+      const cash = draft.paymentMethod === 'especes';
       const result = await clientOrderService.create(draft);
-      setOrder(result.order);
+      draft.reset();
+      navigate(`/client/suivi/${result.order.id}${cash ? '' : '?payer=1'}`);
     } catch (err) {
       const errors = err.response?.data?.errors ?? {};
       setFieldErrors(Object.fromEntries(Object.entries(errors).map(([k, v]) => [k, v[0]])));
@@ -148,41 +152,7 @@ export default function OrderTunnel() {
     }
   }
 
-  // Le paiement n'a pas lieu ici : le client règle à la réception du colis, devant le livreur,
-  // depuis la page de suivi (cf. PaymentCard).
-  function handleTrack() {
-    draft.reset();
-    navigate(`/client/suivi/${order.id}`);
-  }
-
   const canContinue = Boolean(pickup && dropoff && estimate && !estimating);
-
-  if (order) {
-    return (
-      <div className="mx-auto max-w-xl">
-        <Card>
-          <h1 className="font-display text-xl font-bold">Commande confirmée</h1>
-          {order.photo_url && (
-            <div className="mt-4">
-              <PhotoViewer src={order.photo_url} className="h-48 sm:h-64" />
-              <p className="mt-1 text-xs text-on-surface-variant">Voici la photo que les livreurs voient.</p>
-            </div>
-          )}
-          <p className="mt-3 text-sm text-on-surface-variant">
-            Commande <strong>#{order.reference}</strong> créée. Les livreurs voient votre photo et votre prix : l'un
-            d'eux va l'accepter ou vous proposer un autre montant, que vous êtes libre d'accepter ou non.
-          </p>
-          <p className="mt-3 rounded bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">
-            Rien à payer maintenant : vous réglerez <strong>{formatFcfa(order.price)}</strong> à la réception du colis,
-            devant le livreur (Mobile Money, carte ou espèces).
-          </p>
-          <Button onClick={handleTrack} className="mt-6 w-full">
-            Suivre ma commande
-          </Button>
-        </Card>
-      </div>
-    );
-  }
 
   return (
     <div className="mx-auto max-w-2xl">
@@ -462,15 +432,19 @@ export default function OrderTunnel() {
             <Row label="À (B)" value={[draft.dropoffAddress, draft.dropoffDetails].filter(Boolean).join(' · ')} />
             <Row label="Destinataire" value={`${draft.recipientName} · ${draft.recipientPhone}`} />
             <Row label="Urgence" value={draft.urgency === 'express' ? 'Express' : 'Standard'} />
-            <Row label="Paiement" value="À la réception, devant le livreur" />
+            <Row label="Paiement" value={draft.paymentMethod === 'especes' ? 'En espèces, remis au livreur au retrait du colis' : 'En ligne maintenant, bloqué jusqu\'à la réception'} />
           </dl>
+
+          <div className="mt-5">
+            <PaymentMethodPicker value={draft.paymentMethod} onChange={(v) => draft.setField('paymentMethod', v)} price={formatFcfa(price)} />
+          </div>
 
           <div className="mt-6 flex gap-3">
             <Button variant="secondary" onClick={() => setStep(1)} disabled={creating} className="flex-1">
               Modifier
             </Button>
             <Button onClick={handleConfirmOrder} disabled={creating} className="flex-1">
-              {creating ? 'Envoi…' : 'Confirmer la commande'}
+              {creating ? 'Création…' : draft.paymentMethod === 'especes' ? 'Publier la livraison' : `Payer ${formatFcfa(price)} et publier`}
             </Button>
           </div>
         </Card>

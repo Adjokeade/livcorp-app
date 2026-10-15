@@ -5,10 +5,14 @@ namespace App\Http\Controllers\Api\Client;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Client\EstimateOrderRequest;
 use App\Http\Requests\Client\StoreOrderRequest;
-use App\Jobs\OpenOrderToAllDeliverers;
 use App\Models\Deliverer;
+use App\Models\Dispute;
 use App\Models\Order;
+use App\Services\AuditLogService;
 use App\Services\GeolocationService;
+use App\Services\KkiapayService;
+use App\Services\OnlinePaymentService;
+use App\Notifications\DeliveryConfirmed;
 use App\Notifications\OrderCancelledByClient;
 use App\Services\OrderDispatchService;
 use App\Services\OrderStatusService;
@@ -30,15 +34,17 @@ class OrderController extends Controller
 {
     private const MAX_BATCH = 10;
 
-    /** Durée pendant laquelle une course « d'abord aux favoris » leur est réservée. */
-    private const PRIORITY_MINUTES = 10;
-
     public function __construct(
         private readonly GeolocationService $geo,
         private readonly ParcelPhotoService $photos,
+        private readonly OnlinePaymentService $payments,
         private readonly OrderDispatchService $dispatch,
+        private readonly KkiapayService $kkiapay,
         private readonly OrderStatusService $statusService,
+        private readonly AuditLogService $auditLog,
     ) {}
+
+    private const PAYMENT_UNAVAILABLE = 'Le paiement en ligne est momentanément indisponible : la livraison ne peut pas être publiée pour le moment. Réessayez dans quelques instants.';
 
     public function index(Request $request)
     {
@@ -79,15 +85,38 @@ class OrderController extends Controller
         ]);
     }
 
+    /**
+     * Création d'une livraison : elle est payée tout de suite (en ligne), l'argent reste bloqué chez LIV corp jusqu'à la
+     * confirmation de réception. Tant qu'elle n'est pas payée elle reste invisible des livreurs. La réponse contient donc
+     * le paiement à ouvrir dans le widget KKiaPay.
+     */
     public function store(StoreOrderRequest $request)
     {
         $validated = $request->validated();
+        $cash = ($validated['payment_method'] ?? 'en_ligne') === 'especes';
+
+        // Pas de livraison « fantôme » impossible à payer : on refuse avant de créer quoi que ce soit.
+        if (! $cash && ! $this->kkiapay->isConfigured()) {
+            return response()->json(['message' => self::PAYMENT_UNAVAILABLE], 502);
+        }
 
         // La distance est toujours recalculée ici, jamais reprise du client.
         $route = $this->routeFor($validated);
         $order = $this->createOrder($request->user(), $validated, $route, $request->file('photo'));
 
-        return response()->json(['order' => $order], 201);
+        // En espèces : rien à payer maintenant, la livraison est publiée tout de suite (le livreur encaissera au retrait).
+        if ($cash) {
+            rescue(fn () => $this->dispatch->publish($order));
+
+            return response()->json(['order' => $order->fresh()], 201);
+        }
+
+        $transaction = $this->payments->start(collect([$order]));
+
+        return response()->json([
+            'order' => $order->fresh(),
+            'payment' => $this->payments->widgetPayload($transaction, $request->user()),
+        ], 201);
     }
 
     /**
@@ -99,7 +128,12 @@ class OrderController extends Controller
     {
         abort_unless($request->user()->account_type === 'entreprise', 403, 'L\'envoi en lot est réservé aux comptes entreprise.');
 
-        $shared = ['pickup_address', 'pickup_lat', 'pickup_lng', 'pickup_details', 'favorites_first'];
+        $cash = $request->input('payment_method') === 'especes';
+        if (! $cash && ! $this->kkiapay->isConfigured()) {
+            return response()->json(['message' => self::PAYMENT_UNAVAILABLE], 502);
+        }
+
+        $shared = ['pickup_address', 'pickup_lat', 'pickup_lng', 'pickup_details', 'favorites_first', 'payment_method'];
         $rules = ['orders' => 'required|array|min:1|max:'.self::MAX_BATCH];
         foreach ((new StoreOrderRequest)->rules() as $field => $rule) {
             if ($field === 'merchant_id') {
@@ -137,7 +171,19 @@ class OrderController extends Controller
             });
         });
 
-        return response()->json(['orders' => $created], 201);
+        if ($cash) {
+            $created->each(fn (Order $o) => rescue(fn () => $this->dispatch->publish($o)));
+
+            return response()->json(['orders' => $created->map->fresh()->values()], 201);
+        }
+
+        // Un seul paiement couvre tout l'envoi : le total s'ouvre dans un seul widget.
+        $transaction = $this->payments->start($created);
+
+        return response()->json([
+            'orders' => $created->map->fresh()->values(),
+            'payment' => $this->payments->widgetPayload($transaction, $request->user()),
+        ], 201);
     }
 
     /** Statistiques d'activité de l'expéditeur : mois en cours, mois précédent, six derniers mois. */
@@ -172,7 +218,7 @@ class OrderController extends Controller
         })->values();
 
         $open = $request->user()->visibleOrders()
-            ->whereIn('status', [Order::STATUS_CREEE, Order::STATUS_ACCEPTEE, Order::STATUS_COLIS_RECUPERE, Order::STATUS_EN_COURS_LIVRAISON, Order::STATUS_LITIGE])
+            ->whereIn('status', [Order::STATUS_CREEE, Order::STATUS_ACCEPTEE, Order::STATUS_COLIS_RECUPERE, Order::STATUS_EN_COURS_LIVRAISON, Order::STATUS_REMISE, Order::STATUS_LITIGE])
             ->count();
         $toReview = $request->user()->visibleOrders()
             ->where('status', Order::STATUS_LIVREE)->whereDoesntHave('review')->count();
@@ -180,6 +226,10 @@ class OrderController extends Controller
         return response()->json([
             'in_progress' => $open,
             'to_review' => $toReview,
+            // Colis remis dont l'expéditeur doit confirmer la réception (l'argent du livreur en dépend).
+            'to_confirm' => $request->user()->visibleOrders()->where('status', Order::STATUS_REMISE)->count(),
+            'to_pay' => $request->user()->visibleOrders()->where('status', Order::STATUS_CREEE)->where('payment_status', '!=', 'paye')
+                ->where(fn ($q) => $q->whereNull('payment_method')->orWhere('payment_method', '!=', 'especes'))->count(),
             'this_month' => $summary($inMonth($thisMonth)),
             'last_month' => $summary($inMonth($thisMonth->copy()->subMonth())),
             'history' => $history,
@@ -201,11 +251,12 @@ class OrderController extends Controller
         $favoritesFirst = ! empty($validated['favorites_first'])
             && DB::table('favorite_deliverers')->where('user_id', $priorityOwner)->exists();
 
-        // Aucun paiement à la commande : le client règle à la réception du colis, devant le
-        // livreur (cf. PaymentController), au prix imposé ci-dessus.
+        // La livraison est créée NON payée (donc invisible des livreurs) : le paiement qui suit la publie (OnlinePaymentService).
+        // Plus de code de remise : le livreur envoie une photo de réception, que l'expéditeur confirme.
         $order = Order::create([
-            ...collect($validated)->except('photo', 'favorites_first')->all(),
-            'priority_until' => $favoritesFirst ? now()->addMinutes(self::PRIORITY_MINUTES) : null,
+            ...collect($validated)->except('photo', 'favorites_first', 'payment_method')->all(),
+            'payment_method' => ($validated['payment_method'] ?? 'en_ligne') === 'especes' ? 'especes' : null,
+            'priority_until' => $favoritesFirst ? now()->addMinutes(OrderDispatchService::PRIORITY_MINUTES) : null,
             'priority_owner_id' => $favoritesFirst ? $priorityOwner : null,
             'reference' => 'LIV-'.now()->format('Y').'-'.strtoupper(Str::random(6)),
             'client_id' => $user->id,
@@ -215,19 +266,9 @@ class OrderController extends Controller
             'price_suggested' => $suggested,
             'price' => $price,
             'initial_price' => $price,
-            // Code de remise : le destinataire le donne au livreur à la réception, c'est ce qui prouve la livraison.
-            'delivery_code' => (string) random_int(1000, 9999),
             'status' => Order::STATUS_CREEE,
             'payment_status' => 'en_attente',
         ]);
-
-        // Les livreurs disponibles à proximité sont prévenus tout de suite (notification push).
-        if ($favoritesFirst) {
-            $this->dispatch->notifyNearbyDeliverers($order, 'favorites');
-            OpenOrderToAllDeliverers::dispatch($order)->delay($order->priority_until);
-        } else {
-            $this->dispatch->notifyNearbyDeliverers($order);
-        }
 
         return $order;
     }
@@ -243,11 +284,6 @@ class OrderController extends Controller
             'transaction',
             'review',
         ])->loadCount(['messages as unread_messages_count' => fn ($q) => $q->whereIn('sender_id', Deliverer::select('user_id')->whereColumn('deliverers.id', 'orders.deliverer_id'))->whereNull('read_at')->whereColumn('order_messages.deliverer_id', 'orders.deliverer_id')]);
-
-        // Le code de remise n'est utile qu'au client, tant que la livraison n'est pas terminée.
-        if (! in_array($order->status, [Order::STATUS_LIVREE, Order::STATUS_ANNULEE], true)) {
-            $order->makeVisible('delivery_code');
-        }
 
         return $order->maskContacts();
     }
@@ -275,6 +311,11 @@ class OrderController extends Controller
                 return ['error' => 'Le livreur a déjà récupéré le colis : la commande ne peut plus être annulée. En cas de problème, contactez-nous.'];
             }
 
+            // Le livreur a déjà encaissé les espèces : annuler obligerait à les rendre à la main, on passe par l'équipe.
+            if ($locked->isCash() && $locked->isPaid()) {
+                return ['error' => 'Le livreur a déjà encaissé vos espèces : la commande ne peut plus être annulée ici. Contactez-nous.'];
+            }
+
             $assigned = $locked->deliverer?->user;
 
             $this->statusService->transitionTo(
@@ -295,7 +336,84 @@ class OrderController extends Controller
             rescue(fn () => $outcome['assigned']->notify(new OrderCancelledByClient($outcome['order'], wasAssigned: true)));
         }
 
-        return response()->json(['order' => $outcome['order']]);
+        // L'argent bloqué chez LIV corp est rendu au client ; une livraison jamais payée ferme simplement sa tentative de paiement.
+        $this->payments->cancelUnpaid($outcome['order']);
+        $refund = $this->payments->refundOrder($outcome['order'], 'Annulée par le client');
+
+        return response()->json(['order' => $outcome['order']->fresh([...Order::DELIVERER_PUBLIC, 'statusHistory'])->maskContacts(), 'refund' => $refund]);
+    }
+
+    /**
+     * Confirmation de réception par l'EXPÉDITEUR (le destinataire n'a pas forcément l'application) : il a vu la photo de
+     * réception envoyée par le livreur. L'argent bloqué devient alors un solde pour le livreur.
+     */
+    public function confirmDelivery(Request $request, Order $order)
+    {
+        $this->authorize('view', $order);
+
+        $outcome = DB::transaction(function () use ($order) {
+            $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+
+            if ($locked->status !== Order::STATUS_REMISE) {
+                return ['error' => $locked->status === Order::STATUS_LIVREE
+                    ? 'Cette livraison est déjà confirmée.'
+                    : 'Il n\'y a rien à confirmer : le livreur n\'a pas encore remis le colis.'];
+            }
+
+            $this->statusService->transitionTo($locked, Order::STATUS_LIVREE, 'Réception confirmée par l\'expéditeur');
+
+            return ['order' => $locked->fresh()];
+        });
+
+        if (isset($outcome['error'])) {
+            return response()->json(['message' => $outcome['error']], 422);
+        }
+
+        $this->auditLog->log('order.delivery_confirmed', $outcome['order'], ['by' => 'client']);
+        rescue(fn () => $outcome['order']->deliverer?->user?->notify(new DeliveryConfirmed($outcome['order'])));
+
+        return response()->json(['order' => $outcome['order']->fresh([...Order::DELIVERER_PUBLIC, 'statusHistory'])->maskContacts()]);
+    }
+
+    /**
+     * Problème signalé à la réception (colis absent, abîmé, photo douteuse…) : la livraison passe en litige, l'argent reste
+     * bloqué chez LIV corp et l'administration tranche (remboursement du client ou paiement du livreur).
+     */
+    public function reportProblem(Request $request, Order $order)
+    {
+        $this->authorize('view', $order);
+
+        $validated = $request->validate([
+            'reason' => 'required|in:colis_endommage,colis_non_livre,autre',
+            'description' => 'required|string|min:5|max:1000',
+        ], ['description.required' => 'Décrivez le problème en quelques mots.', 'description.min' => 'Décrivez le problème en quelques mots.']);
+
+        $outcome = DB::transaction(function () use ($order, $validated, $request) {
+            $locked = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
+
+            if ($locked->status !== Order::STATUS_REMISE) {
+                return ['error' => 'Un problème ne se signale qu\'une fois le colis remis, avant de confirmer la réception.'];
+            }
+
+            Dispute::create([
+                'order_id' => $locked->id,
+                'raised_by' => $request->user()->id,
+                'reason' => $validated['reason'],
+                'description' => $validated['description'],
+                'status' => 'ouvert',
+            ]);
+            $this->statusService->transitionTo($locked, Order::STATUS_LITIGE, 'Problème signalé à la réception');
+
+            return ['order' => $locked->fresh()];
+        });
+
+        if (isset($outcome['error'])) {
+            return response()->json(['message' => $outcome['error']], 422);
+        }
+
+        $this->auditLog->log('order.problem_reported', $outcome['order'], ['reason' => $validated['reason']]);
+
+        return response()->json(['order' => $outcome['order']->fresh([...Order::DELIVERER_PUBLIC, 'statusHistory'])->maskContacts()]);
     }
 
     /**

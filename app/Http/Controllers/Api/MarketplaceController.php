@@ -22,17 +22,17 @@ class MarketplaceController extends Controller
     public function orders(Request $request)
     {
         $orders = Order::query()
-            ->where('status', Order::STATUS_CREEE)
-            ->whereNull('deliverer_id')
+            ->published()
             // Les courses réservées aux livreurs favoris d'un client restent hors de la page publique.
             ->where(fn ($q) => $q->whereNull('priority_until')->orWhere('priority_until', '<=', now()))
             ->latest()
-            ->get(['id', 'reference', 'type', 'urgency', 'price', 'distance_km', 'duration_min', 'package_type', 'pickup_address', 'dropoff_address', 'photo_path', 'created_at'])
+            ->get(['id', 'reference', 'type', 'urgency', 'payment_method', 'price', 'distance_km', 'duration_min', 'package_type', 'pickup_address', 'dropoff_address', 'photo_path', 'created_at'])
             ->map(fn (Order $order) => [
                 'id' => $order->id,
                 'reference' => $order->reference,
                 'type' => $order->type,
                 'urgency' => $order->urgency,
+                'payment_method' => $order->payment_method, // « especes » : le livreur encaisse au retrait du colis
                 'price' => $order->price,
                 'distance_km' => $order->distance_km,
                 'duration_min' => $order->duration_min,

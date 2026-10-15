@@ -146,7 +146,7 @@ function PhoneMockup({ active, reduced }) {
               <span className="text-[11px] text-on-surface-variant">Votre prix</span>
               <strong className="font-display text-sm text-primary">1 800 FCFA</strong>
             </div>
-            <p className="mt-2 text-[10px] text-on-surface-variant">Paiement à la réception : espèces, Mobile Money ou carte.</p>
+            <p className="mt-2 text-[10px] text-on-surface-variant">Paiement au choix : Mobile Money ou carte (bloqué jusqu'à la réception), ou espèces.</p>
             <div className="mt-auto rounded-lg bg-primary py-2.5 text-center text-xs font-semibold text-on-primary">Envoyer le colis</div>
           </Screen>
 
@@ -187,8 +187,8 @@ function PhoneMockup({ active, reduced }) {
                 <div className="h-full w-2/3 rounded-full bg-primary" />
               </div>
               <div className="mt-3 flex items-center justify-between rounded-lg bg-surface-container px-3 py-2 text-[10px]">
-                <span className="text-on-surface-variant">Code de remise</span>
-                <strong className="tracking-[0.3em]">••••</strong>
+                <span className="text-on-surface-variant">Photo de réception</span>
+                <strong>Confirmer ✓</strong>
               </div>
             </div>
           </Screen>

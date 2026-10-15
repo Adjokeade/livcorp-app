@@ -37,7 +37,7 @@ use App\Http\Controllers\Api\OrderPhotoController;
 use App\Http\Controllers\Api\PushSubscriptionController;
 use App\Http\Controllers\Api\Merchant\OrderController as MerchantOrderController;
 use App\Http\Controllers\Api\Merchant\ShopController;
-use App\Http\Controllers\Api\Webhook\FedaPayWebhookController;
+use App\Http\Controllers\Api\Webhook\KkiapayWebhookController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -69,8 +69,8 @@ Route::prefix('v1')->group(function () {
         ->middleware(['auth:sanctum', 'throttle:6,1'])
         ->name('verification.send');
 
-    // --- Webhook FedaPay (public, sécurisé par signature — voir controller) ---
-    Route::post('/webhooks/fedapay', [FedaPayWebhookController::class, 'handle']);
+    // --- Webhook KKiaPay (public, protégé par le secret hash — voir controller) ---
+    Route::post('/webhooks/kkiapay', [KkiapayWebhookController::class, 'handle'])->middleware('throttle:120,1');
 
     // --- Formulaire "Contactez-nous" (public) ---
     Route::post('/contact', [ContactMessageController::class, 'store'])->middleware('throttle:5,1');
@@ -144,6 +144,9 @@ Route::prefix('v1')->group(function () {
             Route::get('/orders/{order}', [ClientOrderController::class, 'show']);
             Route::get('/orders/{order}/track', [ClientOrderController::class, 'track']);
             Route::post('/orders/{order}/payment', [PaymentController::class, 'store'])->middleware('throttle:20,1');
+            Route::post('/payments/confirm', [PaymentController::class, 'confirm'])->middleware('throttle:30,1');
+            Route::post('/orders/{order}/confirm-delivery', [ClientOrderController::class, 'confirmDelivery'])->middleware('throttle:20,1');
+            Route::post('/orders/{order}/report-problem', [ClientOrderController::class, 'reportProblem'])->middleware('throttle:10,1');
             Route::post('/orders/{order}/review', [ClientReviewController::class, 'store'])->middleware('throttle:20,1');
         });
 
@@ -163,8 +166,8 @@ Route::prefix('v1')->group(function () {
             Route::get('/orders/mine', [DelivererOrderController::class, 'myOrders']);
             Route::post('/orders/{order}/accept', [DelivererOrderController::class, 'accept']);
             Route::post('/orders/{order}/arrived', [DelivererDeliveryController::class, 'arrived'])->middleware('throttle:20,1');
+            Route::post('/orders/{order}/cash-collected', [DelivererDeliveryController::class, 'cashCollected'])->middleware('throttle:20,1');
             Route::post('/orders/{order}/deliver', [DelivererDeliveryController::class, 'deliver'])->middleware('throttle:20,1');
-            Route::post('/orders/{order}/remind-code', [DelivererDeliveryController::class, 'remindCode']);
             Route::post('/orders/{order}/release', [DelivererDeliveryController::class, 'release'])->middleware('throttle:10,1');
             Route::post('/orders/{order}/unreachable', [DelivererDeliveryController::class, 'unreachable'])->middleware('throttle:10,1');
             Route::patch('/orders/{order}/status', [DelivererOrderController::class, 'updateStatus']);
@@ -199,6 +202,10 @@ Route::prefix('v1')->group(function () {
             Route::get('/finance/summary', [FinanceController::class, 'summary']);
             Route::get('/finance/commissions', [FinanceController::class, 'commissions']);
             Route::get('/finance/payouts', [FinanceController::class, 'payouts']);
+            Route::get('/finance/refunds', [FinanceController::class, 'refunds']);
+            Route::post('/finance/refunds/{transaction}/done', [FinanceController::class, 'refundDone']);
+            Route::post('/finance/payouts/{payout}/pay', [FinanceController::class, 'payPayout']);
+            Route::post('/finance/payouts/{payout}/cancel', [FinanceController::class, 'cancelPayout']);
             Route::post('/finance/payouts/run', [FinanceController::class, 'runPayouts'])->middleware('throttle:5,1');
             Route::get('/finance/settings', [FinanceController::class, 'settings']);
             Route::put('/finance/settings', [FinanceController::class, 'updateSettings']);

@@ -2,11 +2,11 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import useAuthStore from '../../store/useAuthStore';
 import clientOrderService from '../../services/clientOrderService';
-import StatusBadge from '../../components/common/StatusBadge';
+import StatusBadge, { displayStatus } from '../../components/common/StatusBadge';
 import Spinner from '../../components/common/Spinner';
 import { formatFcfa, shortPlace, timeAgo } from '../../lib/format';
 
-const ACTIVE = ['creee', 'acceptee', 'colis_recupere', 'en_cours_livraison', 'litige'];
+const ACTIVE = ['creee', 'acceptee', 'colis_recupere', 'en_cours_livraison', 'remise', 'litige'];
 
 function Stat({ label, value }) {
   return (
@@ -102,6 +102,21 @@ export default function ClientHome() {
         </div>
       )}
 
+      {stats && (stats.to_confirm > 0 || stats.to_pay > 0) && (
+        <div className="flex flex-col gap-2">
+          {stats.to_confirm > 0 && (
+            <Link to="/client/commandes" className="rounded-lg bg-primary px-4 py-3 text-sm font-semibold text-on-primary">
+              {stats.to_confirm} colis remis à confirmer : votre confirmation débloque le paiement du livreur ›
+            </Link>
+          )}
+          {stats.to_pay > 0 && (
+            <Link to="/client/commandes" className="rounded-lg bg-error-container px-4 py-3 text-sm font-semibold text-on-error-container">
+              {stats.to_pay} livraison{stats.to_pay > 1 ? 's' : ''} en attente de paiement (invisible{stats.to_pay > 1 ? 's' : ''} des livreurs) ›
+            </Link>
+          )}
+        </div>
+      )}
+
       {stats && isEntreprise && <EnterpriseStats stats={stats} />}
 
       <section>
@@ -124,7 +139,7 @@ export default function ClientHome() {
                     <p className="break-words font-semibold sm:truncate">{shortPlace(o.pickup_address)} → {shortPlace(o.dropoff_address)}</p>
                     <p className="text-xs text-on-surface-variant">#{o.reference} · {timeAgo(o.created_at)}</p>
                   </div>
-                  <StatusBadge status={o.status} className="w-fit shrink-0" />
+                  <StatusBadge status={displayStatus(o)} className="w-fit shrink-0" />
                 </Link>
               </li>
             ))}

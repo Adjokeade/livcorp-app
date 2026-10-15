@@ -58,6 +58,9 @@ export default function DeliveryRequestCard({ request, onOpen }) {
           <span className="rounded-full bg-surface-container-lowest/95 px-2.5 py-1 text-xs font-bold text-on-surface shadow-sm">
             {isCourse ? 'Course' : 'Colis'}
           </span>
+          {r.payment_method === 'especes' && (
+            <span className="rounded-full bg-surface-container-lowest/95 px-2.5 py-1 text-xs font-bold text-on-surface shadow-sm">Espèces</span>
+          )}
           {r.urgency === 'express' && (
             <span className="rounded-full bg-primary px-2.5 py-1 text-xs font-bold text-on-primary shadow-sm">Express</span>
           )}
@@ -120,6 +123,7 @@ export function fromPublicOrder(order) {
     reference: order.reference,
     type: order.type,
     urgency: order.urgency,
+    payment_method: order.payment_method,
     price: order.price,
     from: order.pickup_area,
     to: order.dropoff_area,
@@ -138,6 +142,7 @@ export function fromDelivererOrder(order, shortPlace) {
     reference: order.reference,
     type: order.type,
     urgency: order.urgency,
+    payment_method: order.payment_method,
     price: order.price,
     from: shortPlace(order.pickup_address),
     to: shortPlace(order.dropoff_address),

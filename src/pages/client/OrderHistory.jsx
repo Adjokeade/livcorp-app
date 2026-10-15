@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import clientOrderService from '../../services/clientOrderService';
 import CancelOrderCard from '../../components/client/CancelOrderCard';
 import AnnouncementCard from '../../components/announcements/AnnouncementCard';
-import StatusBadge from '../../components/common/StatusBadge';
+import StatusBadge, { displayStatus } from '../../components/common/StatusBadge';
 import Spinner from '../../components/common/Spinner';
 import Stars from '../../components/common/Stars';
 import useAuthStore from '../../store/useAuthStore';
@@ -64,7 +64,7 @@ export default function OrderHistory() {
               description={order.package_type}
               photoUrl={order.photo_url}
               photoNote={order.type === 'course' ? 'Course' : 'Sans photo'}
-              corner={<StatusBadge status={order.status} />}
+              corner={<StatusBadge status={displayStatus(order)} />}
               price={order.price}
               priceNote={
                 order.unread_messages_count > 0 ? (
@@ -75,7 +75,7 @@ export default function OrderHistory() {
                   order.review ? <Stars value={order.review.rating} /> : <span className="font-semibold text-primary">À noter</span>
                 ) : undefined
               }
-              cta={['acceptee', 'colis_recupere', 'en_cours_livraison'].includes(order.status) ? 'Suivre en direct' : order.status === 'livree' ? 'Détails' : 'Suivre'}
+              cta={order.status === 'remise' ? 'Confirmer la réception' : order.awaiting_payment ? 'Payer' : ['acceptee', 'colis_recupere', 'en_cours_livraison'].includes(order.status) ? 'Suivre en direct' : order.status === 'livree' ? 'Détails' : 'Suivre'}
             />
             {(order.status === 'creee' || order.status === 'acceptee' || order.status === 'annulee') && (
               <div className="flex items-center justify-between gap-3 px-1">
