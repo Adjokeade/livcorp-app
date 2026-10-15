@@ -65,7 +65,7 @@ export default function Header() {
                 Connexion
               </Link>
               <Link to="/inscription" className="btn-primary hidden sm:inline-flex">
-                Commencer
+                Inscription
               </Link>
             </>
           )}
@@ -128,7 +128,7 @@ export default function Header() {
                   Connexion
                 </Link>
                 <Link to="/inscription" onClick={() => setMenuOpen(false)} className="btn-primary w-full">
-                  Commencer
+                  Inscription
                 </Link>
               </>
             )}

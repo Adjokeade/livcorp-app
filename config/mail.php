@@ -14,7 +14,15 @@ return [
     |
     */
 
-    'default' => env('MAIL_MAILER', 'log'),
+    // Interrupteur d'envoi : tant que MAIL_ENABLED est faux (par défaut), AUCUN e-mail ne part. Chaque message est
+    // seulement écrit dans storage/logs (mode « silencieux »). Pour activer : MAIL_ENABLED=true et les identifiants
+    // SMTP du fournisseur (Brevo : smtp-relay.brevo.com, port 587). MAIL_MAILER ne sert qu'à choisir un autre
+    // transport que SMTP (ses, postmark…) une fois l'envoi activé.
+    'enabled' => (bool) env('MAIL_ENABLED', false),
+
+    'default' => env('MAIL_ENABLED', false)
+        ? (env('MAIL_MAILER', 'smtp') === 'log' ? 'smtp' : env('MAIL_MAILER', 'smtp'))
+        : 'log',
 
     /*
     |--------------------------------------------------------------------------

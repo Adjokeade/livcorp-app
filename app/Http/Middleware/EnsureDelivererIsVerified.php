@@ -22,6 +22,14 @@ class EnsureDelivererIsVerified
             ], 403);
         }
 
+        // Le client doit pouvoir reconnaître son livreur : pas de course sans photo de profil.
+        if (! $request->user()->hasAvatar()) {
+            return response()->json([
+                'message' => 'Ajoutez votre photo de profil pour accéder à vos courses.',
+                'code' => 'avatar_required',
+            ], 403);
+        }
+
         return $next($request);
     }
 }

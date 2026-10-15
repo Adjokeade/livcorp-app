@@ -21,15 +21,11 @@ class MarketplaceController extends Controller
 
     public function orders(Request $request)
     {
-        // La photo n'est montrée qu'aux livreurs validés et aux administrateurs : le client l'a jointe
-        // pour ceux qui vont transporter le colis, pas pour tout visiteur de la page.
-        $viewer = $request->user('sanctum');
-        $canSeePhoto = $viewer && ($viewer->isAdmin() || ($viewer->isLivreur() && $viewer->deliverer?->isVerified()));
-
         $orders = Order::query()
             ->where('status', Order::STATUS_CREEE)
             ->whereNull('deliverer_id')
-            ->withCount(['offers as offers_count' => fn ($q) => $q->where('status', 'pending')])
+            // Les courses réservées aux livreurs favoris d'un client restent hors de la page publique.
+            ->where(fn ($q) => $q->whereNull('priority_until')->orWhere('priority_until', '<=', now()))
             ->latest()
             ->get(['id', 'reference', 'type', 'urgency', 'price', 'distance_km', 'duration_min', 'package_type', 'pickup_address', 'dropoff_address', 'photo_path', 'created_at'])
             ->map(fn (Order $order) => [
@@ -45,8 +41,8 @@ class MarketplaceController extends Controller
                 'pickup_area' => Order::areaOf($order->pickup_address),
                 'dropoff_area' => Order::areaOf($order->dropoff_address),
                 'has_photo' => filled($order->photo_path),
-                'photo_url' => $canSeePhoto ? $order->photo_url : null,
-                'offers_count' => $order->offers_count,
+                // La photo du colis est publique, comme l'annonce : l'URL est signée et expire au bout de quelques heures.
+                'photo_url' => $order->photo_url,
                 'created_at' => $order->created_at,
             ]);
 

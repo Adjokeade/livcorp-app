@@ -204,11 +204,13 @@ class OrderTrackingTest extends TestCase
         $this->postJson("/api/v1/deliverer/orders/{$order->id}/location", ['lat' => 6.37, 'lng' => 2.40])->assertOk();
         Notification::assertNotSentTo($client, DelivererNearby::class);
 
-        // À ~150 m : prévenu.
+        // À ~150 m, une minute plus tard : prévenu.
+        $this->travel(60)->seconds();
         $this->postJson("/api/v1/deliverer/orders/{$order->id}/location", ['lat' => self::DROPOFF[0] + 0.0013, 'lng' => self::DROPOFF[1]])->assertOk();
         Notification::assertSentToTimes($client, DelivererNearby::class, 1);
 
         // Il se rapproche encore : pas de deuxième alerte.
+        $this->travel(20)->seconds();
         $this->postJson("/api/v1/deliverer/orders/{$order->id}/location", ['lat' => self::DROPOFF[0], 'lng' => self::DROPOFF[1]])->assertOk();
         Notification::assertSentToTimes($client, DelivererNearby::class, 1);
     }

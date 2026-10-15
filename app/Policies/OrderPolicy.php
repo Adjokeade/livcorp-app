@@ -15,7 +15,7 @@ class OrderPolicy
     public function view(User $user, Order $order): bool
     {
         return match ($user->role) {
-            'client' => $order->client_id === $user->id,
+            'client' => $user->canActForClient($order->client_id),
             'livreur' => $order->deliverer_id === $user->deliverer?->id,
             'commercant' => $order->merchant_id === $user->merchant?->id,
             'admin' => true,
@@ -39,11 +39,11 @@ class OrderPolicy
     public function chat(User $user, Order $order): bool
     {
         return $order->deliverer_id !== null
-            && ($order->client_id === $user->id || ($user->isLivreur() && $order->deliverer_id === $user->deliverer?->id));
+            && ($user->canActForClient($order->client_id) || ($user->isLivreur() && $order->deliverer_id === $user->deliverer?->id));
     }
 
     public function track(User $user, Order $order): bool
     {
-        return $order->client_id === $user->id || $user->isAdmin();
+        return ($user->isClient() && $user->canActForClient($order->client_id)) || $user->isAdmin();
     }
 }

@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Models\Order;
-use App\Models\PriceOffer;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Concerns\BuildsPlatformData;
 use Tests\TestCase;
@@ -59,33 +58,31 @@ class MarketplaceAnnouncementsTest extends TestCase
         }
     }
 
-    public function test_the_photo_is_hidden_from_visitors_and_clients_but_shown_to_verified_deliverers_and_admins(): void
+    public function test_the_photo_is_visible_to_everyone_through_a_signed_url(): void
     {
         $order = $this->announcement();
+        $expected = $order->fresh()->photo_url;
 
+        // Visiteur, client, livreur non validé, livreur validé, admin : tous voient la photo.
         $this->getJson('/api/v1/marketplace/orders')
             ->assertJsonPath('data.0.has_photo', true)
-            ->assertJsonPath('data.0.photo_url', null);
+            ->assertJsonPath('data.0.photo_url', $expected);
 
-        $this->actingAs($this->makeUser('client'), 'sanctum')->getJson('/api/v1/marketplace/orders')->assertJsonPath('data.0.photo_url', null);
-        $this->actingAs($this->makeDeliverer('pending')->user, 'sanctum')->getJson('/api/v1/marketplace/orders')->assertJsonPath('data.0.photo_url', null);
+        foreach ([$this->makeUser('client'), $this->makeDeliverer('pending')->user, $this->makeDeliverer()->user, $this->makeUser('admin')] as $viewer) {
+            $this->actingAs($viewer, 'sanctum')->getJson('/api/v1/marketplace/orders')->assertJsonPath('data.0.photo_url', $expected);
+        }
 
-        $this->actingAs($this->makeDeliverer()->user, 'sanctum')->getJson('/api/v1/marketplace/orders')
-            ->assertJsonPath('data.0.photo_url', $order->fresh()->photo_url);
-        $this->actingAs($this->makeUser('admin'), 'sanctum')->getJson('/api/v1/marketplace/orders')
-            ->assertJsonPath('data.0.photo_url', $order->fresh()->photo_url);
+        // L'URL reste signée : une signature falsifiée est refusée.
+        $this->assertStringContainsString('signature=', $expected);
+        $this->get(preg_replace('/signature=[^&]+/', 'signature=faux', $expected))->assertForbidden();
     }
 
-    public function test_only_free_orders_are_listed_with_their_pending_offers_count(): void
+    public function test_only_free_orders_are_listed(): void
     {
-        $order = $this->announcement();
-        PriceOffer::create(['order_id' => $order->id, 'deliverer_id' => $this->makeDeliverer()->id, 'amount' => 2500]);
-        PriceOffer::create(['order_id' => $order->id, 'deliverer_id' => $this->makeDeliverer()->id, 'amount' => 2200, 'status' => 'declined']);
+        $this->announcement();
         $this->makeOrder($this->makeUser('client'), $this->makeDeliverer(), Order::STATUS_ACCEPTEE);
 
-        $this->getJson('/api/v1/marketplace/orders')
-            ->assertJsonCount(1, 'data')
-            ->assertJsonPath('data.0.offers_count', 1);
+        $this->getJson('/api/v1/marketplace/orders')->assertJsonCount(1, 'data');
     }
 
     public function test_the_deliverer_sees_addresses_and_landmarks_but_not_the_recipient_before_accepting(): void
@@ -98,7 +95,6 @@ class MarketplaceAnnouncementsTest extends TestCase
 
         $this->assertStringContainsString('Boulevard Saint-Michel', $item['pickup_address']);
         $this->assertSame('Portail bleu, code 4821', $item['pickup_details']);
-        $this->assertSame(0, $item['offers_count']);
         $this->assertNotNull($item['client_first_name']);
         $this->assertArrayNotHasKey('recipient_name', $item);
         $this->assertArrayNotHasKey('recipient_phone', $item);

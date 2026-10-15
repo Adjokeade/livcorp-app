@@ -9,6 +9,31 @@ const adminService = {
   rejectDeliverer: (delivererId, reason) =>
     api.post(`/admin/deliverers/${delivererId}/reject`, { reason }).then((r) => r.data),
 
+  // Annuaire des livreurs (tous statuts) et gestion des comptes.
+  deliverers: (params = {}) => api.get('/admin/deliverers', { params }).then((r) => r.data),
+  deliverer: (delivererId) => api.get(`/admin/deliverers/${delivererId}`).then((r) => r.data),
+  // Finances : synthèse, commissions, versements, taux de commission.
+  financeSummary: (period = 'month') => api.get('/admin/finance/summary', { params: { period } }).then((r) => r.data),
+  financeCommissions: (params = {}) => api.get('/admin/finance/commissions', { params }).then((r) => r.data),
+  financePayouts: (params = {}) => api.get('/admin/finance/payouts', { params }).then((r) => r.data),
+  runPayouts: () => api.post('/admin/finance/payouts/run').then((r) => r.data),
+  financeSettings: () => api.get('/admin/finance/settings').then((r) => r.data),
+  updateFinanceSettings: (payload) => api.put('/admin/finance/settings', payload).then((r) => r.data),
+
+  users: (params = {}) => api.get('/admin/users', { params }).then((r) => r.data),
+  // Tarif négocié avec une entreprise (compte propriétaire) ; la suppression la ramène au barème standard.
+  setUserTariff: (userId, tariff) => api.put(`/admin/users/${userId}/tariff`, tariff).then((r) => r.data),
+  clearUserTariff: (userId) => api.delete(`/admin/users/${userId}/tariff`),
+  setUserActive: (userId, isActive) => api.patch(`/admin/users/${userId}`, { is_active: isActive }).then((r) => r.data),
+
+  // Toutes les livraisons de la plateforme ; l'annulation d'autorité exige un motif.
+  orders: (params = {}) => api.get('/admin/orders', { params }).then((r) => r.data),
+  cancelOrder: (orderId, reason) => api.post(`/admin/orders/${orderId}/cancel`, { reason }).then((r) => r.data),
+
+  // Barème de prix.
+  tariff: () => api.get('/admin/tariff').then((r) => r.data),
+  updateTariff: (payload) => api.put('/admin/tariff', payload).then((r) => r.data),
+
   // Pièce justificative renvoyée en blob (le jeton Bearer ne passe pas par un simple lien).
   documentBlob: (documentId) =>
     api.get(`/admin/documents/${documentId}`, { responseType: 'blob' }).then((r) => r.data),

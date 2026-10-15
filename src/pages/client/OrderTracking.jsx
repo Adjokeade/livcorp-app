@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import clientOrderService from '../../services/clientOrderService';
 import Card from '../../components/common/Card';
 import StatusBadge from '../../components/common/StatusBadge';
@@ -8,12 +8,13 @@ import Spinner from '../../components/common/Spinner';
 import Stars from '../../components/common/Stars';
 import ReviewForm from '../../components/client/ReviewForm';
 import PaymentCard from '../../components/client/PaymentCard';
-import OffersCard from '../../components/client/OffersCard';
 import OrderSummaryCard from '../../components/client/OrderSummaryCard';
 import CancelOrderCard from '../../components/client/CancelOrderCard';
 import { formatDate, formatTime } from '../../lib/format';
 import TrackingMap from '../../components/client/TrackingMap';
 import LiveTrackingCard from '../../components/client/LiveTrackingCard';
+import Avatar from '../../components/common/Avatar';
+import FavoriteButton from '../../components/client/FavoriteButton';
 import OrderTimeline from '../../components/client/OrderTimeline';
 import DeliveryCodeCard from '../../components/client/DeliveryCodeCard';
 import UnreachableCard from '../../components/client/UnreachableCard';
@@ -30,9 +31,7 @@ function humanMessage(order) {
       if ((order.status_history ?? []).some((h) => h.status === 'creee' && h.note?.startsWith('Désistement'))) {
         return "Votre précédent livreur ne peut plus assurer la course. Elle est de nouveau proposée aux livreurs : vous serez prévenu dès qu'un livreur l'accepte.";
       }
-      return (order.offers?.length ?? 0) > 0
-        ? 'Des livreurs vous ont fait une proposition de prix : à vous de choisir.'
-        : 'Nous cherchons un livreur disponible près de chez vous…';
+      return 'Nous cherchons un livreur disponible près de chez vous…';
     case 'acceptee':
       return `${name ?? 'Votre livreur'} a accepté votre course et se dirige vers le point de collecte.`;
     case 'colis_recupere':
@@ -52,6 +51,7 @@ function humanMessage(order) {
 
 export default function OrderTracking() {
   const { orderId } = useParams();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [chatOpen, setChatOpen] = useState(searchParams.get('chat') === '1');
   const [order, setOrder] = useState(null);
@@ -123,7 +123,7 @@ export default function OrderTracking() {
     .pop();
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_380px]">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
       {(['acceptee', 'colis_recupere', 'en_cours_livraison'].includes(order.status) && order.deliverer) || order.status === 'litige' ? (
         <div className="flex flex-col gap-4 lg:col-span-2">
           {order.status === 'litige' ? (
@@ -157,11 +157,9 @@ export default function OrderTracking() {
 
         {order.deliverer && (
           <Card>
-            <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary-fixed font-display text-lg font-bold text-on-secondary-fixed">
-                {order.deliverer.user?.first_name?.[0] ?? '?'}
-              </div>
-              <div className="flex-1">
+            <div className="flex flex-wrap items-center gap-3">
+              <Avatar src={order.deliverer.user?.avatar_url} name={order.deliverer.user?.first_name} size="md" />
+              <div className="min-w-0 flex-1 basis-32">
                 <p className="font-semibold">{order.deliverer.user?.first_name}</p>
                 <TrustBadge icon="⭐">
                   {Number(order.deliverer.average_rating) > 0
@@ -174,8 +172,9 @@ export default function OrderTracking() {
                     {[order.deliverer.vehicle_type, order.deliverer.vehicle_plate].filter(Boolean).join(' · ')}
                   </p>
                 )}
+                <FavoriteButton order={order} />
               </div>
-              <div className="flex flex-shrink-0 items-center gap-2">
+              <div className="flex w-full flex-shrink-0 items-center gap-2 min-[400px]:w-auto">
                 <button
                   type="button"
                   onClick={() => setChatOpen(true)}
@@ -202,14 +201,6 @@ export default function OrderTracking() {
         {order.status !== 'en_cours_livraison' && (
           <DeliveryCodeCard order={order} delivererName={order.deliverer?.user?.first_name} />
         )}
-
-        <OffersCard
-          order={order}
-          onAccepted={(updated) => applyLocal((prev) => ({ ...prev, ...updated, offers: [] }))}
-          onDeclined={(offerId) =>
-            applyLocal((prev) => ({ ...prev, offers: (prev.offers ?? []).filter((o) => o.id !== offerId) }))
-          }
-        />
 
         {order.deliverer && !['annulee', 'litige'].includes(order.status) && (
           <PaymentCard
@@ -268,8 +259,28 @@ export default function OrderTracking() {
         <CancelOrderCard
           order={order}
           delivererName={order.deliverer?.user?.first_name}
-          onCancelled={(cancelled) => applyLocal((prev) => ({ ...prev, ...cancelled, offers: [] }))}
+          onCancelled={(cancelled) => applyLocal((prev) => ({ ...prev, ...cancelled }))}
         />
+
+        {order.status === 'annulee' && (
+          <Card className="!p-4 text-center">
+            <button
+              type="button"
+              className="text-sm font-semibold text-error hover:underline"
+              onClick={async () => {
+                try {
+                  await clientOrderService.hide(order.id);
+                  navigate('/client/commandes');
+                } catch {
+                  // la demande reste visible : l'utilisateur peut réessayer
+                }
+              }}
+            >
+              Retirer de ma liste
+            </button>
+            <p className="mt-1 text-xs text-on-surface-variant">Elle disparaît de vos livraisons, sans effet sur la plateforme.</p>
+          </Card>
+        )}
 
         {order.status !== 'annulee' && <OrderTimeline order={order} />}
       </div>

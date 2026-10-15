@@ -14,7 +14,7 @@ const REASONS = [
 
 // Annulation par le client. Possible tant que le livreur n'a pas récupéré le colis ; ensuite le colis est entre
 // ses mains : on explique pourquoi le bouton disparaît et vers qui se tourner en cas de problème.
-export default function CancelOrderCard({ order, delivererName, onCancelled }) {
+export default function CancelOrderCard({ order, delivererName, onCancelled, compact = false }) {
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState('');
   const [details, setDetails] = useState('');
@@ -24,7 +24,9 @@ export default function CancelOrderCard({ order, delivererName, onCancelled }) {
   const cancellable = order.status === 'creee' || order.status === 'acceptee';
   const pickedUp = order.status === 'colis_recupere' || order.status === 'en_cours_livraison';
 
-  if (pickedUp) {
+  // Version discrète pour les listes : un simple lien « Annuler », la fiche de confirmation est la même.
+  if (compact && !cancellable) return null;
+  if (pickedUp && !compact) {
     return (
       <p className="rounded-lg bg-surface-container px-4 py-3 text-sm text-on-surface-variant">
         Le livreur a récupéré votre colis : la commande ne peut plus être annulée. Un problème ?{' '}
@@ -53,17 +55,23 @@ export default function CancelOrderCard({ order, delivererName, onCancelled }) {
 
   return (
     <>
-      <Card className="!p-4">
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-haspopup="dialog"
-          className="w-full text-center text-sm font-semibold text-error underline-offset-2 hover:underline"
-        >
-          Annuler la commande
+      {compact ? (
+        <button type="button" onClick={() => setOpen(true)} aria-haspopup="dialog" className="text-sm font-semibold text-error hover:underline">
+          Annuler
         </button>
-        <p className="mt-1 text-center text-xs text-on-surface-variant">Possible tant que le livreur n'a pas récupéré le colis.</p>
-      </Card>
+      ) : (
+        <Card className="!p-4">
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-haspopup="dialog"
+            className="w-full text-center text-sm font-semibold text-error underline-offset-2 hover:underline"
+          >
+            Annuler la commande
+          </button>
+          <p className="mt-1 text-center text-xs text-on-surface-variant">Possible tant que le livreur n'a pas récupéré le colis.</p>
+        </Card>
+      )}
 
       <Sheet
         open={open}
@@ -84,7 +92,7 @@ export default function CancelOrderCard({ order, delivererName, onCancelled }) {
         <p className="rounded-lg bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">
           {order.status === 'acceptee'
             ? `${delivererName ?? 'Votre livreur'} a déjà accepté votre course : il sera prévenu tout de suite.`
-            : "Aucun livreur n'a encore accepté votre course. Les livreurs qui vous ont fait une proposition seront prévenus."}{' '}
+            : "Aucun livreur n'a encore accepté votre course."}{' '}
           Rien n'est à payer : le règlement se fait à la réception du colis.
         </p>
 

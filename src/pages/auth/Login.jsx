@@ -6,10 +6,9 @@ import Input from '../../components/common/Input';
 import Button from '../../components/common/Button';
 import { homeAfterLogin } from '../../lib/roleHome';
 
-// Mêmes trois profils qu'à l'inscription. La connexion elle-même ne change
-// pas (un compte a un seul rôle, déjà connu du serveur) : ce choix sert
-// surtout à orienter vers la bonne inscription si l'utilisateur n'a pas
-// encore de compte, et à garder une expérience cohérente d'un écran à l'autre.
+// Mêmes trois profils qu'à l'inscription. La catégorie choisie est envoyée
+// au serveur, qui refuse la connexion si elle ne correspond pas au compte.
+// Elle oriente aussi vers la bonne inscription.
 const PROFILES = [
   { value: 'particulier', label: 'Particulier', registerTo: '/inscription?account_type=particulier' },
   { value: 'entreprise', label: 'Entreprise', registerTo: '/inscription?account_type=entreprise' },
@@ -40,7 +39,7 @@ export default function Login() {
   async function handleSubmit(e) {
     e.preventDefault();
     try {
-      const user = await login(form.email, form.password);
+      const user = await login(form.email, form.password, profile);
       navigate(homeAfterLogin(user, location.state?.from?.pathname), { replace: true });
     } catch {
       // l'erreur est déjà exposée via le store (cf. `error`)
@@ -104,6 +103,11 @@ export default function Login() {
             value={form.password}
             onChange={(e) => setForm({ ...form, password: e.target.value })}
           />
+          <div className="-mt-2 text-right">
+            <Link to="/mot-de-passe-oublie" className="text-sm font-semibold text-secondary">
+              Mot de passe oublié ?
+            </Link>
+          </div>
           <Button type="submit" disabled={status === 'loading'} className="mt-2 w-full">
             {status === 'loading' ? 'Connexion…' : 'Se connecter'}
           </Button>

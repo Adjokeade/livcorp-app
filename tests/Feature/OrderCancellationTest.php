@@ -3,7 +3,6 @@
 namespace Tests\Feature;
 
 use App\Models\Order;
-use App\Models\PriceOffer;
 use App\Notifications\OrderCancelledByClient;
 use App\Notifications\OrderStatusUpdatedForClient;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -50,20 +49,6 @@ class OrderCancellationTest extends TestCase
         $this->cancel($order, $client)->assertOk()->assertJsonPath('order.status', 'annulee');
 
         Notification::assertSentTo($deliverer->user, OrderCancelledByClient::class, fn ($n) => $n->wasAssigned === true);
-    }
-
-    public function test_deliverers_with_a_pending_offer_are_told_and_their_offers_fall(): void
-    {
-        Notification::fake();
-        $client = $this->makeUser('client');
-        $order = $this->makeOrder($client, null, Order::STATUS_CREEE);
-        $bidder = $this->makeDeliverer();
-        PriceOffer::create(['order_id' => $order->id, 'deliverer_id' => $bidder->id, 'amount' => 4000]);
-
-        $this->cancel($order, $client)->assertOk();
-
-        $this->assertSame('declined', PriceOffer::first()->status);
-        Notification::assertSentTo($bidder->user, OrderCancelledByClient::class, fn ($n) => $n->wasAssigned === false);
     }
 
     public function test_it_is_refused_once_the_parcel_is_picked_up(): void
@@ -129,17 +114,46 @@ class OrderCancellationTest extends TestCase
         $this->assertNotNull($order->fresh()->deliverer_id);
     }
 
-    public function test_offers_and_payment_are_closed_on_a_cancelled_order(): void
+    public function test_payment_is_closed_on_a_cancelled_order(): void
     {
         $client = $this->makeUser('client');
         $order = $this->makeOrder($client, null, Order::STATUS_CREEE);
         $this->cancel($order, $client)->assertOk();
 
-        $this->actingAs($this->makeDeliverer()->user, 'sanctum')
-            ->postJson("/api/v1/deliverer/orders/{$order->id}/offer", ['amount' => 4000])
-            ->assertUnprocessable();
         $this->actingAs($client, 'sanctum')
             ->postJson("/api/v1/client/orders/{$order->id}/payment", ['method' => 'especes'])
             ->assertUnprocessable();
+    }
+
+    public function test_a_cancelled_order_leaves_the_marketplace_and_can_be_removed_from_the_list(): void
+    {
+        Notification::fake();
+        $client = $this->makeUser('client');
+        $order = $this->makeOrder($client, null, Order::STATUS_CREEE);
+
+        $this->getJson('/api/v1/marketplace/orders')->assertJsonCount(1, 'data');
+
+        // Encore active : il faut annuler d'abord.
+        $this->actingAs($client, 'sanctum')->deleteJson("/api/v1/client/orders/{$order->id}")->assertUnprocessable();
+
+        $this->cancel($order, $client)->assertOk();
+        $this->getJson('/api/v1/marketplace/orders')->assertJsonCount(0, 'data');
+
+        $this->actingAs($client, 'sanctum')->getJson('/api/v1/client/orders')->assertJsonCount(1, 'data');
+        $this->actingAs($client, 'sanctum')->deleteJson("/api/v1/client/orders/{$order->id}")->assertNoContent();
+        $this->actingAs($client, 'sanctum')->getJson('/api/v1/client/orders')->assertJsonCount(0, 'data');
+
+        // La demande reste connue de la plateforme (historique, statistiques).
+        $this->assertNotNull($order->fresh()->client_hidden_at);
+    }
+
+    public function test_only_the_owner_can_remove_an_order(): void
+    {
+        Notification::fake();
+        $client = $this->makeUser('client');
+        $other = $this->makeUser('client');
+        $order = $this->makeOrder($client, null, Order::STATUS_ANNULEE);
+
+        $this->actingAs($other, 'sanctum')->deleteJson("/api/v1/client/orders/{$order->id}")->assertForbidden();
     }
 }

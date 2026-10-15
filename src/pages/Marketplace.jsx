@@ -1,35 +1,77 @@
-import { useEffect, useState } from 'react';
-import { MapContainer, Marker, TileLayer } from 'react-leaflet';
-import L from 'leaflet';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router-dom';
 import marketplaceService from '../services/marketplaceService';
+import delivererService from '../services/delivererService';
 import useAuthStore from '../store/useAuthStore';
 import useDetailParam from '../hooks/useDetailParam';
-import AnnouncementCard from '../components/announcements/AnnouncementCard';
+import DeliveryRequestCard, { fromDelivererOrder, fromPublicOrder } from '../components/announcements/DeliveryRequestCard';
+import AvailableOrderSheet from '../components/deliverer/AvailableOrderSheet';
 import PublicAnnouncementSheet from '../components/announcements/PublicAnnouncementSheet';
 import Card from '../components/common/Card';
 import TrustBadge from '../components/common/TrustBadge';
 import Spinner from '../components/common/Spinner';
-import { formatDuration, formatKm, timeAgo } from '../lib/format';
+import { shortPlace, timeAgo } from '../lib/format';
 
-// Corrige les icônes par défaut de Leaflet (chemins cassés avec les bundlers Vite).
-delete L.Icon.Default.prototype._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-});
+const normalize = (text) => String(text ?? '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 
-const COTONOU = [6.3703, 2.3912];
+const SORTS = {
+  recent: { label: 'Plus récentes', fn: (a, b) => new Date(b.created_at) - new Date(a.created_at) },
+  price_desc: { label: 'Prix le plus élevé', fn: (a, b) => Number(b.price) - Number(a.price) },
+  price_asc: { label: 'Prix le plus bas', fn: (a, b) => Number(a.price) - Number(b.price) },
+  distance_asc: { label: 'Trajet le plus court', fn: (a, b) => Number(a.distance_km ?? 1e9) - Number(b.distance_km ?? 1e9) },
+};
 
-// Le pouls de la plateforme, en direct : colis en attente d'un livreur, et
-// livreurs actuellement disponibles avec leur position. Ouvert à tout
-// utilisateur connecté, pas seulement aux clients.
+function CardSkeleton() {
+  return (
+    <div className="card animate-pulse overflow-hidden !p-0" aria-hidden="true">
+      <div className="h-28 bg-surface-container" />
+      <div className="space-y-3 p-4">
+        <div className="h-4 w-2/3 rounded bg-surface-container" />
+        <div className="h-4 w-1/2 rounded bg-surface-container" />
+        <div className="flex gap-2"><div className="h-6 w-16 rounded-full bg-surface-container" /><div className="h-6 w-16 rounded-full bg-surface-container" /></div>
+        <div className="h-7 w-28 rounded bg-surface-container" />
+      </div>
+    </div>
+  );
+}
+
+function Segment({ options, value, onChange, label }) {
+  return (
+    <div role="group" aria-label={label} className="inline-flex rounded-lg border border-outline-variant p-0.5">
+      {options.map(([key, text]) => (
+        <button
+          type="button"
+          key={key}
+          onClick={() => onChange(key)}
+          aria-pressed={value === key}
+          className={`rounded-md px-3 py-1.5 text-sm font-semibold transition ${value === key ? 'bg-primary text-on-primary' : 'text-on-surface-variant hover:bg-surface-container'}`}
+        >
+          {text}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// Le pouls de la plateforme, en direct : demandes de livraison en attente d'un livreur, et livreurs
+// actuellement disponibles avec leur position. Ouvert à tous ; un livreur validé y voit les courses en
+// détail et peut les accepter ou proposer son prix sans quitter la page.
 export default function Marketplace() {
+  const navigate = useNavigate();
+  const viewer = useAuthStore((s) => s.user);
+  const approvedDeliverer = viewer?.role === 'livreur' && viewer.deliverer?.verification_status === 'approved';
   const [position, setPosition] = useState(null);
-  const [orders, setOrders] = useState(null);
+  const [orders, setOrders] = useState(null); // modèle brut : public (zones) ou livreur (adresses exactes)
+  const [pagination, setPagination] = useState({ page: 1, last: 1 });
   const [deliverers, setDeliverers] = useState(null);
   const [error, setError] = useState('');
-  const viewer = useAuthStore((s) => s.user);
+  const [actionError, setActionError] = useState('');
+  const [busyId, setBusyId] = useState(null);
+  const [updatedAt, setUpdatedAt] = useState(null);
+  const [, setTick] = useState(0);
+  const [refreshing, setRefreshing] = useState(false);
+  const [filters, setFilters] = useState({ q: '', type: 'all', express: false, sort: 'recent' });
+  const pagesLoaded = useRef(1);
   const detail = useDetailParam();
   const selected = orders?.find((o) => String(o.id) === detail.openId) ?? null;
 
@@ -41,19 +83,46 @@ export default function Marketplace() {
     );
   }, []);
 
+  // Lecture des annonces : toutes les pages déjà chargées sont relues, pour ne pas perdre le "Voir plus".
+  const load = useCallback(async () => {
+    try {
+      if (approvedDeliverer) {
+        const pages = [];
+        let last = 1;
+        for (let page = 1; page <= pagesLoaded.current; page++) {
+          const data = await delivererService.available(page);
+          pages.push(...(data.data ?? []));
+          last = data.last_page ?? 1;
+        }
+        setOrders(pages);
+        setPagination({ page: pagesLoaded.current, last });
+      } else {
+        const data = await marketplaceService.orders();
+        setOrders(data.data ?? []);
+        setPagination({ page: 1, last: 1 });
+      }
+      setUpdatedAt(Date.now());
+    } catch {
+      setOrders((prev) => prev ?? []);
+    }
+  }, [approvedDeliverer]);
+
   // Les annonces se relisent toutes les 20 s (onglet visible) : une annonce prise disparaît, une nouvelle apparaît.
   useEffect(() => {
-    const load = () =>
-      marketplaceService
-        .orders()
-        .then((data) => setOrders(data.data ?? []))
-        .catch(() => setOrders((prev) => prev ?? []));
+    pagesLoaded.current = 1;
+    setOrders(null);
     load();
     const timer = setInterval(() => {
       if (!document.hidden) load();
     }, 20000);
     return () => clearInterval(timer);
-  }, [viewer?.id]);
+  }, [load, viewer?.id]);
+
+  // Fait avancer le libellé « actualisé il y a… ».
+  useEffect(() => {
+    const timer = setInterval(() => setTick((t) => t + 1), 15000);
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,83 +141,161 @@ export default function Marketplace() {
     };
   }, [position]);
 
+  async function refreshNow() {
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  async function loadMore() {
+    pagesLoaded.current += 1;
+    setRefreshing(true);
+    await load();
+    setRefreshing(false);
+  }
+
+  // Action du livreur validé, directement depuis la fiche.
+  async function handleAccept(orderId) {
+    setBusyId(orderId);
+    setActionError('');
+    try {
+      await delivererService.accept(orderId);
+      navigate('/deliverer/tableau-de-bord?onglet=mine');
+    } catch (err) {
+      setActionError(err.response?.data?.message ?? "Impossible d'accepter cette course. Elle a peut-être été prise.");
+      await load();
+    } finally {
+      setBusyId(null);
+    }
+  }
+
+  const cards = useMemo(() => {
+    if (!orders) return null;
+    const q = normalize(filters.q);
+    return orders
+      .map((o) => (approvedDeliverer ? fromDelivererOrder(o, shortPlace) : fromPublicOrder(o)))
+      .filter((c) => filters.type === 'all' || c.type === filters.type)
+      .filter((c) => !filters.express || c.urgency === 'express')
+      .filter((c) => !q || normalize(`${c.from} ${c.to} ${c.description} ${c.reference}`).includes(q))
+      .sort(SORTS[filters.sort].fn);
+  }, [orders, filters, approvedDeliverer]);
+
+  const filtered = filters.q || filters.type !== 'all' || filters.express;
+  const resetFilters = () => setFilters({ ...filters, q: '', type: 'all', express: false });
+  const set = (patch) => setFilters((f) => ({ ...f, ...patch }));
+
   return (
     <div className="mx-auto max-w-[1200px] px-4 py-10 sm:px-10">
-      <h1 className="font-display text-2xl font-bold">Annonces</h1>
-      <p className="mt-1 text-sm text-on-surface-variant">
-        L'activité de LIV corp en direct : colis en attente et livreurs disponibles.
-      </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="font-display text-2xl font-bold">Annonces</h1>
+          <p className="mt-1 text-sm text-on-surface-variant">
+            {approvedDeliverer
+              ? 'Les courses ouvertes près de vous : ouvrez une fiche pour voir le détail et l’accepter au prix imposé.'
+              : 'L’activité de LIV corp en direct : demandes de livraison en attente et livreurs disponibles.'}
+          </p>
+        </div>
+        <div className="flex items-center gap-3 text-xs text-on-surface-variant">
+          {updatedAt && <span>Actualisé {timeAgo(new Date(updatedAt).toISOString())}</span>}
+          <button type="button" onClick={refreshNow} disabled={refreshing} className="btn-secondary !px-3 !py-1.5 text-sm">
+            {refreshing ? 'Actualisation…' : 'Actualiser'}
+          </button>
+        </div>
+      </div>
 
+      {viewer?.role === 'livreur' && !approvedDeliverer && (
+        <p className="mt-4 rounded bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">
+          Votre dossier livreur n'est pas encore validé : vous pouvez consulter les annonces, mais pas les accepter.{' '}
+          <Link to="/deliverer/tableau-de-bord" className="font-semibold underline">Voir mon dossier</Link>
+        </p>
+      )}
       {error && <p className="mt-4 rounded bg-error-container px-3 py-2 text-sm text-on-error-container">{error}</p>}
+      {actionError && <p role="alert" className="mt-4 rounded bg-error-container px-3 py-2 text-sm text-on-error-container">{actionError}</p>}
 
       <section className="mt-8">
-        <h2 className="font-display text-lg font-bold">Colis disponibles</h2>
-        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {!orders ? (
-            <div className="col-span-full flex min-h-[15vh] items-center justify-center">
-              <Spinner className="h-8 w-8" />
+        <h2 className="font-display text-lg font-bold">
+          Demandes de livraison{cards ? <span className="ml-2 text-sm font-medium text-on-surface-variant">{cards.length}{filtered && orders ? ` sur ${orders.length}` : ''}</span> : null}
+        </h2>
+
+        <div className="mt-4 flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-center">
+          <input
+            type="search"
+            value={filters.q}
+            onChange={(e) => set({ q: e.target.value })}
+            placeholder="Chercher un quartier, une ville, un colis…"
+            aria-label="Chercher une annonce"
+            className="input-field lg:max-w-xs"
+          />
+          <Segment label="Type" value={filters.type} onChange={(type) => set({ type })} options={[['all', 'Tout'], ['colis', 'Colis'], ['course', 'Courses']]} />
+          <button
+            type="button"
+            onClick={() => set({ express: !filters.express })}
+            aria-pressed={filters.express}
+            className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${filters.express ? 'border-primary bg-primary-fixed text-on-primary-fixed-variant' : 'border-outline-variant text-on-surface-variant'}`}
+          >
+            Express seulement
+          </button>
+          <label className="flex items-center gap-2 text-sm lg:ml-auto">
+            <span className="text-on-surface-variant">Trier par</span>
+            <select value={filters.sort} onChange={(e) => set({ sort: e.target.value })} className="input-field !w-auto !py-2">
+              {Object.entries(SORTS).map(([key, { label }]) => <option key={key} value={key}>{label}</option>)}
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3">
+          {!cards ? (
+            [0, 1, 2].map((i) => <CardSkeleton key={i} />)
+          ) : cards.length === 0 ? (
+            <div className="col-span-full rounded-xl bg-surface-container-lowest p-8 text-center shadow-card">
+              <p className="font-semibold">{filtered ? 'Aucune annonce ne correspond à votre recherche.' : 'Aucune demande de livraison en attente pour le moment.'}</p>
+              <p className="mt-1 text-sm text-on-surface-variant">
+                {filtered ? 'Essayez un autre quartier ou retirez un filtre.' : 'Les nouvelles demandes apparaissent ici dès leur publication.'}
+              </p>
+              {filtered && <button type="button" onClick={resetFilters} className="btn-secondary mt-4">Réinitialiser les filtres</button>}
             </div>
-          ) : orders.length === 0 ? (
-            <p className="col-span-full text-on-surface-variant">Aucun colis en attente pour le moment.</p>
           ) : (
-            orders.map((order) => (
-              <AnnouncementCard
-                key={order.id}
-                title={`${order.pickup_area} → ${order.dropoff_area}`}
-                meta={[order.distance_km != null && formatKm(order.distance_km), order.duration_min && formatDuration(order.duration_min), timeAgo(order.created_at)]
-                  .filter(Boolean)
-                  .join(' · ')}
-                description={order.package_type}
-                photoUrl={order.photo_url}
-                photoNote={order.has_photo ? 'Photo réservée aux livreurs connectés' : order.type === 'course' ? 'Course à effectuer' : 'Sans photo'}
-                chips={[
-                  { label: order.type === 'course' ? 'Course' : 'Colis' },
-                  ...(order.urgency === 'express' ? [{ label: 'Express', tone: 'primary' }] : []),
-                ]}
-                corner={
-                  order.offers_count > 0 && (
-                    <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-bold text-on-secondary shadow-sm">
-                      {order.offers_count} proposition{order.offers_count > 1 ? 's' : ''}
-                    </span>
-                  )
-                }
-                price={order.price}
-                onOpen={() => detail.open(order.id)}
-              />
-            ))
+            cards.map((card) => <DeliveryRequestCard key={card.id} request={card} onOpen={() => detail.open(card.id)} />)
           )}
         </div>
+
+        {approvedDeliverer && pagination.page < pagination.last && (
+          <div className="mt-6 text-center">
+            <button type="button" onClick={loadMore} disabled={refreshing} className="btn-secondary">
+              {refreshing ? 'Chargement…' : 'Voir plus de courses'}
+            </button>
+          </div>
+        )}
       </section>
 
-      <PublicAnnouncementSheet
-        open={Boolean(detail.openId) && orders !== null}
-        order={selected}
-        viewer={viewer}
-        onClose={detail.close}
-      />
+      {approvedDeliverer ? (
+        <AvailableOrderSheet
+          open={Boolean(detail.openId) && orders !== null}
+          order={selected}
+          unavailableReason="gone"
+          busy={busyId !== null && String(busyId) === detail.openId}
+          onClose={detail.close}
+          onAccept={handleAccept}
+        />
+      ) : (
+        <PublicAnnouncementSheet
+          open={Boolean(detail.openId) && orders !== null}
+          order={selected}
+          viewer={viewer}
+          onClose={detail.close}
+        />
+      )}
 
       <section className="mt-10">
         <h2 className="font-display text-lg font-bold">Livreurs disponibles</h2>
-        <div className="mt-4 grid gap-6 lg:grid-cols-[1fr_380px]">
-          <div className="isolate h-[360px] overflow-hidden rounded-lg shadow-card lg:h-[480px]">
-            <MapContainer center={position ?? COTONOU} zoom={13} scrollWheelZoom={false} className="h-full w-full">
-              <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-              {deliverers?.map(
-                (d) => d.lat && d.lng && <Marker key={d.id} position={[Number(d.lat), Number(d.lng)]} />,
-              )}
-            </MapContainer>
-          </div>
-
-          <div className="flex flex-col gap-3">
+        <div className="mt-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {!deliverers ? (
-              <div className="flex min-h-[30vh] items-center justify-center">
+              <div className="col-span-full flex min-h-[15vh] items-center justify-center">
                 <Spinner className="h-8 w-8" />
               </div>
             ) : deliverers.length === 0 ? (
-              <p className="text-on-surface-variant">Aucun livreur disponible pour le moment.</p>
+              <p className="col-span-full text-on-surface-variant">Aucun livreur disponible pour le moment.</p>
             ) : (
               deliverers.map((d) => (
                 <Card key={d.id} className="flex items-center gap-3">

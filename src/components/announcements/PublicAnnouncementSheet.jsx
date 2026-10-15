@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import Sheet from '../common/Sheet';
 import Button from '../common/Button';
@@ -7,6 +8,7 @@ import { formatDuration, formatFcfa, formatKm, timeAgo } from '../../lib/format'
 // et les consignes ne sont donnés qu'au livreur retenu : on n'affiche ici que les zones.
 export default function PublicAnnouncementSheet({ open, order, viewer, onClose }) {
   const location = useLocation();
+  const [copied, setCopied] = useState(false);
 
   if (!order) {
     return (
@@ -28,11 +30,25 @@ export default function PublicAnnouncementSheet({ open, order, viewer, onClose }
     ['Urgence', order.urgency === 'express' ? 'Express (prioritaire)' : 'Standard'],
     ['Description', order.package_type],
     ['Publiée', timeAgo(order.created_at)],
-    ['Propositions en cours', order.offers_count > 0 ? String(order.offers_count) : 'Aucune pour le moment'],
     ['Paiement', 'À la réception du colis, devant le livreur'],
   ].filter(([, value]) => value);
 
   const role = viewer?.role;
+
+  // Lien direct vers cette fiche : partage natif sur mobile, copie dans le presse-papiers sinon.
+  async function share() {
+    const url = `${window.location.origin}/annonces?annonce=${order.id}`;
+    try {
+      if (navigator.share) await navigator.share({ title: `Livraison ${order.pickup_area} → ${order.dropoff_area}`, url });
+      else {
+        await navigator.clipboard.writeText(url);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      }
+    } catch {
+      // partage annulé : rien à faire
+    }
+  }
 
   return (
     <Sheet
@@ -42,8 +58,8 @@ export default function PublicAnnouncementSheet({ open, order, viewer, onClose }
       subtitle={`${order.type === 'course' ? 'Course' : 'Colis'} · #${order.reference}`}
       footer={
         role === 'livreur' ? (
-          <Link to={`/deliverer/tableau-de-bord?annonce=${order.id}`} className="btn-primary w-full">
-            Voir dans mon tableau de bord
+          <Link to="/deliverer/tableau-de-bord" className="btn-primary w-full">
+            {viewer.deliverer?.verification_status === 'approved' ? 'Voir dans mon tableau de bord' : 'Compléter mon dossier pour accepter des courses'}
           </Link>
         ) : role === 'client' ? (
           <Link to="/client/commander" className="btn-primary w-full">
@@ -67,15 +83,13 @@ export default function PublicAnnouncementSheet({ open, order, viewer, onClose }
         </a>
       ) : (
         <p className="rounded-lg bg-primary-fixed px-4 py-3 text-sm text-on-primary-fixed-variant">
-          {order.has_photo
-            ? 'La photo du colis est réservée aux livreurs connectés.'
-            : "Cette annonce n'a pas de photo."}
+          Cette annonce n'a pas de photo.
         </p>
       )}
 
       <div className="mt-4 flex flex-wrap items-end justify-between gap-2">
         <p className="font-display text-3xl font-extrabold text-primary">{formatFcfa(order.price)}</p>
-        <p className="text-xs text-on-surface-variant">Prix fixé par le client, négociable par les livreurs</p>
+        <p className="text-xs text-on-surface-variant">Prix imposé par LIV corp selon la distance</p>
       </div>
 
       <dl className="mt-4 divide-y divide-outline-variant rounded-lg border border-outline-variant text-sm">
@@ -87,9 +101,13 @@ export default function PublicAnnouncementSheet({ open, order, viewer, onClose }
         ))}
       </dl>
 
-      <p className="mt-4 text-xs text-on-surface-variant">
+      <button type="button" onClick={share} className="mt-4 text-sm font-semibold text-secondary">
+        {copied ? 'Lien copié ✓' : 'Partager cette annonce'}
+      </button>
+
+      <p className="mt-3 text-xs text-on-surface-variant">
         {!viewer
-          ? 'Livreur ? Connectez-vous pour voir la photo et proposer vos services. '
+          ? 'Livreur ? Connectez-vous pour proposer vos services. '
           : ''}
         L'adresse exacte, le destinataire et les consignes sont communiqués au livreur retenu.
       </p>

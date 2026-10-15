@@ -152,7 +152,12 @@ class AuthController extends Controller
         $credentials = $request->validate([
             'email' => 'required|email',
             'password' => 'required|string',
+            // Catégorie choisie sur l'écran de connexion (optionnelle : l'auto-connexion
+            // après inscription et les anciens clients ne l'envoient pas).
+            'category' => 'nullable|in:particulier,entreprise,livreur,commercant',
         ]);
+        $category = $credentials['category'] ?? null;
+        unset($credentials['category']);
 
         // Rate limiting anti brute-force — cf. exigence sécurité
         $throttleKey = 'login:'.$request->ip().'|'.$credentials['email'];
@@ -185,6 +190,17 @@ class AuthController extends Controller
             return response()->json(['message' => 'Compte désactivé.'], 403);
         }
 
+        // La catégorie choisie doit correspondre à celle du compte, sinon on refuse
+        // sans émettre de token (l'e-mail et le mot de passe étaient pourtant valides).
+        if ($category && $category !== $this->categoryOf($user)) {
+            Auth::logout();
+
+            return response()->json([
+                'message' => 'Ce compte n\'est pas un compte '.$this->categoryLabel($category).'. Choisissez la bonne catégorie.',
+                'errors' => ['category' => ['Catégorie incorrecte pour ce compte.']],
+            ], 422);
+        }
+
         $user->update(['last_login_at' => now()]);
         $this->auditLog->log('user.login', $user);
 
@@ -203,6 +219,21 @@ class AuthController extends Controller
             ]),
             'token' => $token->plainTextToken,
         ]);
+    }
+
+    private function categoryOf(User $user): string
+    {
+        return $user->role === 'client' ? ($user->account_type ?? 'particulier') : $user->role;
+    }
+
+    private function categoryLabel(string $category): string
+    {
+        return match ($category) {
+            'particulier' => 'particulier',
+            'entreprise' => 'entreprise',
+            'livreur' => 'livreur',
+            'commercant' => 'commerçant',
+        };
     }
 
     public function logout(Request $request)

@@ -44,7 +44,7 @@ class Order extends Model
         'price', 'initial_price', 'price_suggested', 'commission_amount', 'deliverer_payout',
         'status', 'payment_status', 'payment_method', 'paid_at',
         'pickup_arrived_at', 'dropoff_arrived_at', 'delivery_code', 'delivery_code_attempts', 'delivery_code_locked_until',
-        'delivery_photo_path', 'failed_delivery_at',
+        'delivery_photo_path', 'failed_delivery_at', 'priority_until', 'priority_owner_id', 'client_hidden_at',
         'accepted_at', 'picked_up_at', 'delivered_at', 'cancelled_at',
     ];
 
@@ -55,12 +55,12 @@ class Order extends Model
      */
     public const DELIVERER_PUBLIC = [
         'deliverer:id,user_id,average_rating,total_deliveries,vehicle_type,vehicle_plate',
-        'deliverer.user:id,first_name,phone',
+        'deliverer.user:id,first_name,phone,avatar_path',
     ];
 
     // Le code de remise n'est montré qu'au client propriétaire (makeVisible) : jamais au livreur qui doit le recevoir
     // de la bouche du destinataire. Le chemin de la photo de remise reste interne comme celui de la photo du colis.
-    protected $hidden = ['photo_path', 'delivery_code', 'delivery_code_attempts', 'delivery_code_locked_until', 'delivery_photo_path'];
+    protected $hidden = ['photo_path', 'delivery_code', 'delivery_code_attempts', 'delivery_code_locked_until', 'delivery_photo_path', 'priority_owner_id'];
 
     protected $appends = ['photo_url', 'delivery_photo_url'];
 
@@ -88,9 +88,29 @@ class Order extends Model
             'pickup_arrived_at' => 'datetime', 'dropoff_arrived_at' => 'datetime',
             'delivery_code_locked_until' => 'datetime', 'failed_delivery_at' => 'datetime',
             'price' => 'decimal:2', 'initial_price' => 'decimal:2', 'price_suggested' => 'decimal:2', 'commission_amount' => 'decimal:2', 'deliverer_payout' => 'decimal:2',
+            'priority_until' => 'datetime', 'client_hidden_at' => 'datetime',
             'accepted_at' => 'datetime', 'picked_up_at' => 'datetime',
             'delivered_at' => 'datetime', 'cancelled_at' => 'datetime', 'paid_at' => 'datetime',
         ];
+    }
+
+    /**
+     * Courses visibles par ce livreur : celles proposées d'abord aux livreurs favoris du client ne le sont
+     * que pour ces favoris, jusqu'à la fin de la période de priorité.
+     */
+    public function scopeOpenTo($query, Deliverer $deliverer)
+    {
+        return $query->where(fn ($q) => $q
+            ->whereNull('priority_until')
+            ->orWhere('priority_until', '<=', now())
+            ->orWhereExists(fn ($f) => $f->selectRaw('1')->from('favorite_deliverers')
+                ->whereColumn('favorite_deliverers.user_id', 'orders.priority_owner_id')
+                ->where('favorite_deliverers.deliverer_id', $deliverer->id)));
+    }
+
+    public function isOpenTo(Deliverer $deliverer): bool
+    {
+        return static::whereKey($this->id)->openTo($deliverer)->exists();
     }
 
     /**
@@ -168,7 +188,6 @@ class Order extends Model
     public function review(): HasOne { return $this->hasOne(Review::class); }
     public function disputes(): HasMany { return $this->hasMany(Dispute::class); }
     public function commissions(): HasMany { return $this->hasMany(Commission::class); }
-    public function offers(): HasMany { return $this->hasMany(PriceOffer::class); }
     public function messages(): HasMany { return $this->hasMany(OrderMessage::class); }
     public function releases(): HasMany { return $this->hasMany(OrderRelease::class); }
 }

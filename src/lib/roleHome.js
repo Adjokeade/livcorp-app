@@ -1,6 +1,6 @@
 // Page d'accueil de chaque rôle après connexion (mêmes valeurs que User.role côté backend).
 export const ROLE_HOME = {
-  client: '/client/commander',
+  client: '/client/accueil',
   commercant: '/merchant/tableau-de-bord',
   livreur: '/deliverer/tableau-de-bord',
   admin: '/admin',

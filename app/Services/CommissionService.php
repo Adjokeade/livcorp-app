@@ -31,7 +31,7 @@ class CommissionService
             return $existing;
         }
 
-        $rate = (float) config('services.commission.rate_default', 15); // %
+        $rate = FinanceSettings::commissionRate(); // %
         $commissionAmount = round($order->price * $rate / 100, 2);
         $earnings = round($order->price - $commissionAmount, 2);
 

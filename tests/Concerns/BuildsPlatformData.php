@@ -24,6 +24,8 @@ trait BuildsPlatformData
             'phone' => '+2290100'.str_pad((string) $this->seq, 4, '0', STR_PAD_LEFT),
             'password' => 'Passw0rdX',
             'is_active' => true,
+            // Un livreur doit avoir une photo de profil pour accéder à ses courses.
+            'avatar_path' => $role === 'livreur' ? 'avatars/test.jpg' : null,
         ]);
         $user->forceFill(['email_verified_at' => now()])->save();
 

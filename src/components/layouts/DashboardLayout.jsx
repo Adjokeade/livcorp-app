@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Outlet } from 'react-router-dom';
 import Header from './Header';
+import Sidebar from './Sidebar';
 import useAuthStore from '../../store/useAuthStore';
 import InstallBanner from '../pwa/InstallBanner';
 import NotificationPrompt from '../pwa/NotificationPrompt';
@@ -58,10 +59,14 @@ export default function DashboardLayout() {
       <Header />
       {user && <NotificationPrompt />}
       {needsVerification && <VerifyEmailBanner user={user} />}
-      <main className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 sm:px-10 sm:py-10">
-        <Outlet />
-        {user && <NotificationSettings />}
-      </main>
+      {/* pb-24 : laisse la place à la barre de navigation fixe du mobile. */}
+      <div className="mx-auto flex w-full max-w-[1200px] flex-1 gap-8 px-4 pb-24 pt-6 sm:px-10 sm:pt-10 lg:pb-10">
+        <Sidebar />
+        <main className="min-w-0 flex-1">
+          <Outlet />
+          {user && <NotificationSettings />}
+        </main>
+      </div>
       <InstallBanner />
     </div>
   );

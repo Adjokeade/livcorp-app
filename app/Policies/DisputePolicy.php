@@ -11,7 +11,7 @@ class DisputePolicy
     {
         return $user->isAdmin()
             || $dispute->raised_by === $user->id
-            || $dispute->order->client_id === $user->id;
+            || ($user->isClient() && $user->canActForClient($dispute->order->client_id));
     }
 
     public function manage(User $user, Dispute $dispute): bool

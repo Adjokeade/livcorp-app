@@ -24,6 +24,21 @@ npm run dev                # interface sur http://localhost:5173
   8 h (`ADMIN_TOKEN_MINUTES`) et journalise chaque tentative (`audit_logs` : `admin.login`, `admin.login_failed`).
 - Les pages `/admin*` ne sont pas référencées par les moteurs de recherche (`robots.txt` et balise `noindex`).
 
+### E-mails (silencieux par défaut)
+
+Le service d'envoi (Brevo, SMTP) est branché mais **désactivé** : tant que `MAIL_ENABLED=false` (valeur par défaut), aucun e-mail ne
+part, chaque message est seulement écrit dans `storage/logs/laravel-*.log`. Les liens de réinitialisation de mot de passe s'y lisent donc
+en local. La page « Mot de passe oublié » prévient l'utilisateur qu'il ne recevra rien tant que l'envoi est silencieux.
+
+Pour l'activer : `MAIL_ENABLED=true` et `MAIL_USERNAME` / `MAIL_PASSWORD` (clés SMTP Brevo) dans `.env`, puis
+
+```sh
+php artisan mail:status               # silencieux ou actif, identifiants complets ?
+php artisan mail:test vous@exemple.com
+```
+
+Les e-mails passent par la file d'attente : `queue:work` doit tourner. Penser aussi à `EMAIL_VERIFICATION_REQUIRED=true` une fois l'envoi actif.
+
 ### Application installable et notifications push
 
 L'interface est une PWA (installable sur téléphone, utilisable hors ligne pour l'essentiel) et envoie des

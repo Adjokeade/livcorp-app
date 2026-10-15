@@ -95,7 +95,7 @@ class OrderCreationTest extends TestCase
             ->assertJsonValidationErrors('dropoff_lat');
     }
 
-    public function test_order_keeps_the_price_fixed_by_the_client_and_stores_the_photo(): void
+    public function test_order_price_is_imposed_by_the_distance_and_the_photo_is_stored(): void
     {
         Storage::fake('parcel_photos');
         $this->fakeOsrm();
@@ -103,7 +103,7 @@ class OrderCreationTest extends TestCase
         $response = $this->actingAs($this->makeUser('client'), 'sanctum')
             ->postJson('/api/v1/client/orders', $this->order())
             ->assertCreated()
-            ->assertJsonPath('order.price', '1500.00')            // le prix du client, pas le conseillé
+            ->assertJsonPath('order.price', '1880.00')            // barème : 500 + 9,19 km × 150, quel que soit le prix envoyé (1500)
             ->assertJsonPath('order.price_suggested', '1880.00')
             ->assertJsonPath('order.distance_km', '9.19')       // distance routière recalculée côté serveur
             ->assertJsonPath('order.pickup_details', 'Près de la porte principale')
@@ -151,15 +151,41 @@ class OrderCreationTest extends TestCase
             ->assertJsonValidationErrors('photo');
     }
 
-    public function test_price_must_be_a_whole_amount_within_limits(): void
+    public function test_the_client_cannot_choose_the_price(): void
     {
         Storage::fake('parcel_photos');
         $this->fakeOsrm();
         $this->actingAs($this->makeUser('client'), 'sanctum');
 
-        $this->postJson('/api/v1/client/orders', $this->order(['price' => 100]))->assertJsonValidationErrors('price');
-        $this->postJson('/api/v1/client/orders', $this->order(['price' => 2000000]))->assertJsonValidationErrors('price');
-        $this->postJson('/api/v1/client/orders', $this->order(['price' => 1500.5]))->assertJsonValidationErrors('price');
+        foreach ([100, 2000000, 1] as $attempt) {
+            $this->postJson('/api/v1/client/orders', $this->order(['price' => $attempt]))
+                ->assertCreated()->assertJsonPath('order.price', '1880.00');
+        }
+
+        $this->postJson('/api/v1/client/orders', $this->order(['urgency' => 'express']))
+            ->assertCreated()->assertJsonPath('order.price', '2630.00'); // × 1,4
+    }
+
+    public function test_an_enterprise_gets_its_negotiated_tariff_and_the_team_shares_it(): void
+    {
+        Storage::fake('parcel_photos');
+        $this->fakeOsrm();
+        $owner = $this->makeUser('client');
+        $owner->update(['account_type' => 'entreprise', 'company_name' => 'ACME']);
+        $owner->forceFill(['custom_tariff' => ['base_fare' => 300, 'per_km' => 100, 'express_multiplier' => 1.2]])->save();
+        $member = $this->makeUser('client');
+        $member->update(['account_type' => 'entreprise', 'company_id' => $owner->id, 'team_role' => 'operateur']);
+
+        // 300 + 9,19 × 100 = 1219 → 1220 FCFA, contre 1880 au barème standard.
+        $this->actingAs($member, 'sanctum')->postJson('/api/v1/client/orders', $this->order())
+            ->assertCreated()->assertJsonPath('order.price', '1220.00')->assertJsonPath('order.price_suggested', '1880.00');
+
+        $this->postJson('/api/v1/client/orders/estimate', $this->trip())
+            ->assertOk()->assertJsonPath('suggested_prices.standard', 1220)->assertJsonPath('negotiated_tariff', true);
+
+        // Un particulier garde le barème standard.
+        $this->actingAs($this->makeUser('client'), 'sanctum')->postJson('/api/v1/client/orders/estimate', $this->trip())
+            ->assertJsonPath('suggested_prices.standard', 1880)->assertJsonPath('negotiated_tariff', false);
     }
 
     public function test_photo_url_is_signed_and_tampering_is_refused(): void

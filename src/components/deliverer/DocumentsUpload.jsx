@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import delivererService from '../../services/delivererService';
 import Button from '../common/Button';
+import AvatarUploader from '../common/AvatarUploader';
+import useAuthStore from '../../store/useAuthStore';
 
 // Formulaire de dépôt des pièces justificatives (POST /deliverer/documents).
 // Utilisé à la dernière étape de l'inscription livreur et depuis le tableau
 // de bord tant que le dossier n'est pas complet.
 export default function DocumentsUpload({ onDone, submitLabel = 'Envoyer mon dossier' }) {
+  const user = useAuthStore((s) => s.user);
   const [files, setFiles] = useState({ id_card: null, driving_license: null });
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
@@ -15,6 +18,11 @@ export default function DocumentsUpload({ onDone, submitLabel = 'Envoyer mon dos
     e.preventDefault();
     setError('');
     setFieldErrors({});
+
+    if (!user?.avatar_url) {
+      setError('Ajoutez votre photo de profil : elle est obligatoire pour les livreurs.');
+      return;
+    }
 
     if (!files.id_card && !files.driving_license) {
       setError('Ajoutez au moins un document avant d\'envoyer.');
@@ -48,6 +56,10 @@ export default function DocumentsUpload({ onDone, submitLabel = 'Envoyer mon dos
           {error}
         </p>
       )}
+      <div>
+        <span className="mb-2 block text-sm font-semibold">Photo de profil <span className="text-error">*</span></span>
+        {user && <AvatarUploader user={user} required />}
+      </div>
       <FileField
         label="Pièce d'identité (CNI / passeport)"
         file={files.id_card}

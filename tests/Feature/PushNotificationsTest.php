@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\ContactMessage;
 use App\Models\Deliverer;
 use App\Models\Order;
-use App\Models\PriceOffer;
 use App\Models\PushSubscription;
 use App\Models\User;
 use App\Notifications\Channels\WebPushChannel;
@@ -15,8 +14,6 @@ use App\Notifications\DelivererDocumentsReceived;
 use App\Notifications\NewOrderAvailable;
 use App\Notifications\OrderStatusUpdatedForClient;
 use App\Notifications\PaymentValidatedForDeliverer;
-use App\Notifications\PriceOfferAnswered;
-use App\Notifications\PriceOfferReceived;
 use App\Services\OrderStatusService;
 use App\Services\PushService;
 use App\Services\WebPushTransport;
@@ -225,46 +222,6 @@ class PushNotificationsTest extends TestCase
         Notification::assertNotSentTo($far->user, NewOrderAvailable::class);
         Notification::assertNotSentTo($offline->user, NewOrderAvailable::class);
         Notification::assertNotSentTo($noDevice->user, NewOrderAvailable::class);
-    }
-
-    public function test_the_client_is_alerted_of_an_offer_and_of_a_revision_request(): void
-    {
-        Notification::fake();
-        [$client, $order] = $this->order();
-        $deliverer = $this->makeDeliverer();
-
-        $this->actingAs($deliverer->user, 'sanctum')->postJson("/api/v1/deliverer/orders/{$order->id}/offer", ['amount' => 4000])->assertCreated();
-        Notification::assertSentTo($client, PriceOfferReceived::class, fn ($n) => $n->revision === false);
-
-        $accepted = $this->makeOrder($client, $deliverer, Order::STATUS_ACCEPTEE, 3000);
-        $this->postJson("/api/v1/deliverer/orders/{$accepted->id}/offer", ['amount' => 3500])->assertCreated();
-        Notification::assertSentTo($client, PriceOfferReceived::class, fn ($n) => $n->revision === true);
-    }
-
-    public function test_deliverers_learn_who_won_and_who_did_not(): void
-    {
-        Notification::fake();
-        [$client, $order] = $this->order();
-        [$winner, $loser] = [$this->makeDeliverer(), $this->makeDeliverer()];
-        $winning = PriceOffer::create(['order_id' => $order->id, 'deliverer_id' => $winner->id, 'amount' => 4000]);
-        PriceOffer::create(['order_id' => $order->id, 'deliverer_id' => $loser->id, 'amount' => 3800]);
-
-        $this->actingAs($client, 'sanctum')->postJson("/api/v1/client/orders/{$order->id}/offers/{$winning->id}/accept")->assertOk();
-
-        Notification::assertSentTo($winner->user, PriceOfferAnswered::class, fn ($n) => $n->answer === 'accepted');
-        Notification::assertSentTo($loser->user, PriceOfferAnswered::class, fn ($n) => $n->answer === 'declined');
-    }
-
-    public function test_a_declined_offer_alerts_its_author(): void
-    {
-        Notification::fake();
-        [$client, $order] = $this->order();
-        $deliverer = $this->makeDeliverer();
-        $offer = PriceOffer::create(['order_id' => $order->id, 'deliverer_id' => $deliverer->id, 'amount' => 4000]);
-
-        $this->actingAs($client, 'sanctum')->postJson("/api/v1/client/orders/{$order->id}/offers/{$offer->id}/decline")->assertOk();
-
-        Notification::assertSentTo($deliverer->user, PriceOfferAnswered::class, fn ($n) => $n->answer === 'declined');
     }
 
     public function test_the_deliverer_is_alerted_when_the_client_validates_the_payment(): void

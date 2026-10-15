@@ -38,11 +38,21 @@ export default function LiveLocationBanner({ state, courseCount }) {
     );
   }
 
+  const weak = state.accuracy != null && state.accuracy > 100;
+
   return (
+    <>
+      {weak && (
+        <p role="status" className="mt-4 rounded bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">
+          <strong>Signal GPS faible</strong> (précision d'environ {Math.round(state.accuracy)} m). Approchez-vous d'une fenêtre ou sortez à l'air libre, et vérifiez que la localisation « précise » est activée.
+        </p>
+      )}
     <p role="status" className="mt-4 rounded bg-secondary-fixed px-3 py-2 text-sm text-on-secondary-fixed">
       <strong>Position partagée avec {plural}</strong>
       {state.lastSentAt ? ` · envoyée ${formatAge((now - state.lastSentAt) / 1000)}` : ''}. Gardez l'application ouverte et l'écran
       allumé pendant la course.
+      {state.accuracy != null && !weak ? ` GPS précis à ${Math.round(state.accuracy)} m près.` : ''}
     </p>
+    </>
   );
 }

@@ -13,7 +13,7 @@ export default function About() {
         </p>
       </div>
 
-      <div className="mt-12 grid gap-8 sm:grid-cols-3">
+      <div className="mt-12 grid grid-cols-1 gap-8 sm:grid-cols-3">
         <AboutPoint
           title="Des livreurs vérifiés"
           text="Chaque compte livreur est validé par notre équipe (pièce d'identité, informations) avant sa première course."

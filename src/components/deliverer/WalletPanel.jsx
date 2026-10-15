@@ -58,7 +58,7 @@ export default function WalletPanel() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         {wallet.balance < 0 ? (
           <Card className="bg-error-container sm:col-span-1">
             <p className="text-sm font-semibold text-on-error-container">Commissions à régulariser</p>

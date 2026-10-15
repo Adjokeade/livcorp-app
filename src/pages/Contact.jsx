@@ -44,7 +44,7 @@ export default function Contact() {
         </p>
       </div>
 
-      <div className="mt-12 grid gap-8 lg:grid-cols-2 lg:items-start lg:gap-12">
+      <div className="mt-12 grid grid-cols-1 gap-8 lg:grid-cols-2 lg:items-start lg:gap-12">
         {/* Colonne gauche : photo + coordonnées */}
         <div>
           <div className="overflow-hidden rounded-2xl">
@@ -57,7 +57,7 @@ export default function Contact() {
             />
           </div>
 
-          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+          <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Card>
               <p className="text-sm font-semibold text-on-surface-variant">Téléphone</p>
               <a href="tel:+2290146620583" className="mt-1 block font-display text-xl font-bold text-primary">

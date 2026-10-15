@@ -1,67 +1,17 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import adminService from '../../services/adminService';
 import Card from '../../components/common/Card';
+import Avatar from '../../components/common/Avatar';
 import Button from '../../components/common/Button';
 import Spinner from '../../components/common/Spinner';
 
-const TABS = [
-  { key: 'overview', label: 'Vue d\'ensemble' },
-  { key: 'deliverers', label: 'Validation livreurs' },
-  { key: 'messages', label: 'Messages' },
-  { key: 'disputes', label: 'Litiges' },
-  { key: 'tasks', label: 'Tâches internes' },
-];
-
-export default function AdminBackOffice() {
-  const [tab, setTab] = useState('overview');
-  const [newMessages, setNewMessages] = useState(0);
-
-  // Badge de l'onglet Messages : chargé dès l'arrivée sur le back-office.
-  useEffect(() => {
-    adminService
-      .messages({ status: 'nouveau' })
-      .then((r) => setNewMessages(r.new_count ?? 0))
-      .catch(() => {});
-  }, []);
-
-  return (
-    <div>
-      <h1 className="font-display text-2xl font-bold">Back-office LIV corp</h1>
-
-      <div className="mt-6 flex flex-wrap gap-2 border-b border-outline-variant">
-        {TABS.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={`border-b-2 px-1 pb-3 text-sm font-semibold transition ${
-              tab === t.key ? 'border-primary text-primary' : 'border-transparent text-on-surface-variant'
-            }`}
-          >
-            {t.label}
-            {t.key === 'messages' && newMessages > 0 && (
-              <span className="ml-1.5 rounded-full bg-primary px-1.5 py-0.5 text-xs font-bold text-on-primary">
-                {newMessages}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      <div className="mt-6">
-        {tab === 'overview' && <Overview />}
-        {tab === 'deliverers' && <DelivererValidation />}
-        {tab === 'messages' && <Messages onCountChange={setNewMessages} />}
-        {tab === 'disputes' && <Disputes />}
-        {tab === 'tasks' && <Tasks />}
-      </div>
-    </div>
-  );
-}
+// Sections du back-office : chacune est une page du menu horizontal (cf. AdminLayout et App.jsx).
 
 // ------------------------------------------------------------------
 // Vue d'ensemble — GET /admin/dashboard/stats
 // ------------------------------------------------------------------
-function Overview() {
+export function Overview() {
   const [stats, setStats] = useState(null);
   const [period, setPeriod] = useState('month');
 
@@ -87,6 +37,20 @@ function Overview() {
         ))}
       </div>
 
+      {(stats.pending_deliverers > 0 || stats.new_messages > 0 || stats.open_disputes > 0) && (
+        <div className="mt-4 flex flex-wrap gap-3">
+          {[
+            [stats.pending_deliverers, 'dossier livreur à valider', 'dossiers livreur à valider', '/admin/livreurs'],
+            [stats.new_messages, 'message non lu', 'messages non lus', '/admin/messages'],
+            [stats.open_disputes, 'litige à traiter', 'litiges à traiter', '/admin/litiges'],
+          ].filter(([n]) => n > 0).map(([n, one, many, to]) => (
+            <Link key={to} to={to} className="rounded-lg bg-primary-fixed px-4 py-2 text-sm font-semibold text-on-primary-fixed-variant">
+              {n} {n > 1 ? many : one} ›
+            </Link>
+          ))}
+        </div>
+      )}
+
       <div className="mt-4 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
         <StatCard label="Utilisateurs" value={stats.users_total} sub={`+${stats.users_new} récents`} />
         <StatCard label="Commandes totales" value={stats.orders_total} />
@@ -102,7 +66,7 @@ function Overview() {
 // ------------------------------------------------------------------
 // Validation des comptes livreurs — GET/POST /admin/deliverers/*
 // ------------------------------------------------------------------
-function DelivererValidation() {
+export function DelivererValidation() {
   const [pending, setPending] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
@@ -120,6 +84,8 @@ function DelivererValidation() {
     try {
       await adminService.approveDeliverer(id);
       await refresh();
+    } catch (err) {
+      window.alert(err.response?.data?.message ?? 'Validation impossible. Réessayez.');
     } finally {
       setBusyId(null);
     }
@@ -158,9 +124,12 @@ function DelivererValidation() {
       {pending.length === 0 && <p className="text-on-surface-variant">Aucun compte livreur en attente.</p>}
       {pending.map((deliverer) => (
         <Card key={deliverer.id} className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
+          <Avatar src={deliverer.user?.avatar_url} name={deliverer.user?.first_name} size="lg" />
           <div className="min-w-0">
             <p className="font-semibold">
-              {deliverer.user?.first_name} {deliverer.user?.last_name}
+              {deliverer.user?.first_name} {deliverer.user?.last_name}{' '}
+              <Link to={`/admin/livreurs/${deliverer.id}`} className="ml-1 text-sm font-semibold text-secondary underline">Profil complet</Link>
             </p>
             <p className="text-sm text-on-surface-variant">
               {deliverer.vehicle_type} · {deliverer.vehicle_plate} · {deliverer.user?.documents?.length ?? 0} pièce(s)
@@ -180,6 +149,8 @@ function DelivererValidation() {
                 ))}
               </div>
             )}
+            {!deliverer.user?.avatar_url && <p className="mt-1 text-sm font-semibold text-error">Pas de photo de profil : validation impossible.</p>}
+          </div>
           </div>
           <div className="flex flex-shrink-0 gap-2">
             <Button
@@ -207,7 +178,7 @@ function DelivererValidation() {
 // ------------------------------------------------------------------
 // Messages du formulaire Contactez-nous — GET /admin/messages
 // ------------------------------------------------------------------
-function Messages({ onCountChange }) {
+export function Messages({ onCountChange = () => {} }) {
   const [filter, setFilter] = useState('nouveau'); // 'nouveau' | 'tous'
   const [page, setPage] = useState(1);
   const [result, setResult] = useState(null);
@@ -354,7 +325,7 @@ function Messages({ onCountChange }) {
 // ------------------------------------------------------------------
 // Litiges — GET /admin/disputes, POST .../resolve
 // ------------------------------------------------------------------
-function Disputes() {
+export function Disputes() {
   const [disputes, setDisputes] = useState(null);
   const [busyId, setBusyId] = useState(null);
 
@@ -413,7 +384,7 @@ const TASK_COLUMNS = [
   { key: 'traite', label: 'Traité' },
 ];
 
-function Tasks() {
+export function Tasks() {
   const [tasks, setTasks] = useState(null);
 
   async function refresh() {
@@ -433,7 +404,7 @@ function Tasks() {
   if (!tasks) return <Loading />;
 
   return (
-    <div className="grid gap-4 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
       {TASK_COLUMNS.map((col) => (
         <div key={col.key}>
           <h3 className="mb-3 text-sm font-semibold text-on-surface-variant">{col.label}</h3>
@@ -467,7 +438,7 @@ function Tasks() {
   );
 }
 
-function StatCard({ label, value, sub, accent, danger }) {
+export function StatCard({ label, value, sub, accent, danger }) {
   return (
     <div className={`card ${danger ? 'bg-error-container' : accent ? 'bg-primary-fixed' : ''}`}>
       <p className="text-xs font-semibold text-on-surface-variant">{label}</p>
@@ -477,7 +448,7 @@ function StatCard({ label, value, sub, accent, danger }) {
   );
 }
 
-function Loading() {
+export function Loading() {
   return (
     <div className="flex min-h-[30vh] items-center justify-center">
       <Spinner className="h-8 w-8" />

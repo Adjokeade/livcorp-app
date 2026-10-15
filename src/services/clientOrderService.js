@@ -36,22 +36,61 @@ const clientOrderService = {
     add('package_type', draft.packageType);
     add('instructions', draft.instructions);
     add('urgency', draft.urgency);
-    add('price', draft.price);
+    if (draft.favoritesFirst) add('favorites_first', 1);
     if (draft.photo) form.append('photo', draft.photo);
     return api.post('/client/orders', form).then((r) => r.data); // { order }
   },
 
-  show: (orderId) => api.get(`/client/orders/${orderId}`).then((r) => r.data),
+  // Équipe de l'entreprise (propriétaire et responsables uniquement).
+  listTeam: () => api.get('/client/team').then((r) => r.data),
+  addTeamMember: (payload) => api.post('/client/team', payload).then((r) => r.data),
+  updateTeamMember: (id, payload) => api.patch(`/client/team/${id}`, payload).then((r) => r.data),
 
-  // Réponse aux propositions de prix des livreurs. Accepter fixe le prix (et assigne le livreur
-  // si la course était libre) ; refuser laisse la course ouverte.
-  acceptOffer: (orderId, offerId) =>
-    api.post(`/client/orders/${orderId}/offers/${offerId}/accept`).then((r) => r.data),
-  declineOffer: (orderId, offerId) =>
-    api.post(`/client/orders/${orderId}/offers/${offerId}/decline`).then((r) => r.data),
+  // Livreurs favoris (partagés par l'équipe). On ajoute depuis une livraison où le livreur est intervenu.
+  listFavorites: () => api.get('/client/favorites').then((r) => r.data),
+  addFavorite: (orderId) => api.post(`/client/orders/${orderId}/favorite`).then((r) => r.data),
+  removeFavorite: (delivererId) => api.delete(`/client/favorites/${delivererId}`),
+
+  stats: () => api.get('/client/stats').then((r) => r.data),
+
+  // Carnet de destinataires (adresses toujours localisées).
+  listRecipients: () => api.get('/client/recipients').then((r) => r.data),
+  createRecipient: (payload) => api.post('/client/recipients', payload).then((r) => r.data),
+  deleteRecipient: (id) => api.delete(`/client/recipients/${id}`),
+
+  // Envoi en lot (entreprises) : un point de départ commun, une livraison par ligne. Tout ou rien.
+  createBatch: (pickup, rows, { favoritesFirst = false } = {}) => {
+    const form = new FormData();
+    const add = (key, value) => {
+      if (value !== null && value !== undefined && value !== '') form.append(key, value);
+    };
+    add('pickup_address', pickup.address);
+    add('pickup_lat', pickup.lat);
+    add('pickup_lng', pickup.lng);
+    add('pickup_details', pickup.details?.trim());
+    if (favoritesFirst) add('favorites_first', 1);
+    rows.forEach((row, i) => {
+      const k = (field) => `orders[${i}][${field}]`;
+      add(k('type'), row.type);
+      add(k('dropoff_address'), row.recipient.address);
+      add(k('dropoff_lat'), row.recipient.lat);
+      add(k('dropoff_lng'), row.recipient.lng);
+      add(k('dropoff_details'), row.recipient.details);
+      add(k('recipient_name'), row.recipient.name);
+      add(k('recipient_phone'), row.recipient.phone);
+      add(k('package_type'), row.packageType);
+      if (row.photo) form.append(k('photo'), row.photo);
+    });
+    return api.post('/client/orders/batch', form).then((r) => r.data.orders);
+  },
+
+  show: (orderId) => api.get(`/client/orders/${orderId}`).then((r) => r.data),
 
   // Annulation, possible tant que le livreur n'a pas récupéré le colis. `reason` est facultatif.
   cancel: (orderId, reason) => api.post(`/client/orders/${orderId}/cancel`, { reason: reason || null }).then((r) => r.data),
+
+  // « Retirer » une demande annulée de sa liste (elle doit d'abord être annulée).
+  hide: (orderId) => api.delete(`/client/orders/${orderId}`),
 
   // Après un "destinataire injoignable" : le client confirme qu'il est joignable, la remise reprend.
   retryDelivery: (orderId) => api.post(`/client/orders/${orderId}/retry-delivery`).then((r) => r.data.order),

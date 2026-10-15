@@ -16,6 +16,8 @@ class PushLocationRequest extends FormRequest
         return [
             'lat' => 'required|numeric|between:-90,90',
             'lng' => 'required|numeric|between:-180,180',
+            // Précision du GPS en mètres, annoncée par le téléphone.
+            'accuracy' => 'nullable|numeric|min:0|max:100000',
         ];
     }
 }

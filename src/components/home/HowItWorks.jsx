@@ -58,7 +58,7 @@ export default function HowItWorks() {
           <p className="mt-3 text-on-surface-variant">Trois étapes, aucune complication.</p>
         </Reveal>
 
-        <div className="mt-12 grid items-center justify-center gap-14 lg:grid-cols-[minmax(0,34rem)_auto] lg:gap-20">
+        <div className="mt-12 grid grid-cols-1 items-center justify-center gap-14 lg:grid-cols-[minmax(0,34rem)_auto] lg:gap-20">
           <ol
             className="mx-auto flex w-full max-w-xl flex-col gap-3"
             onPointerEnter={(e) => e.pointerType === 'mouse' && setPaused(true)}

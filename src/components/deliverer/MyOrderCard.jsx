@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import delivererService from '../../services/delivererService';
-import { formatFcfa, formatTime } from '../../lib/format';
+import { formatDuration, formatFcfa, formatKm, formatTime } from '../../lib/format';
 import Button from '../common/Button';
 import Card from '../common/Card';
 import ChatSheet from '../common/ChatSheet';
@@ -8,7 +8,6 @@ import PaymentBadge from '../common/PaymentBadge';
 import Sheet from '../common/Sheet';
 import StatusBadge from '../common/StatusBadge';
 import PhotoField from '../client/PhotoField';
-import PriceOfferForm from './PriceOfferForm';
 import RouteInfo from './RouteInfo';
 
 const NEXT_STATUS = {
@@ -42,7 +41,7 @@ function errorText(err, fallback = 'Action impossible. Réessayez.') {
 
 // Une course acceptée, côté livreur : où aller, ce qu'il reste à faire, et les actions de chaque étape
 // (arrivée, remise avec code, désistement, destinataire injoignable, discussion avec le client).
-export default function MyOrderCard({ order, busy, onAdvance, onOffer, onWithdraw, onChanged, onMessagesRead, autoOpenChat = false, onChatShown }) {
+export default function MyOrderCard({ order, nextStop = null, busy, onAdvance, onChanged, onMessagesRead, autoOpenChat = false, onChatShown }) {
   const now = useNow();
   const [chatOpen, setChatOpen] = useState(autoOpenChat);
 
@@ -105,6 +104,14 @@ export default function MyOrderCard({ order, busy, onAdvance, onOffer, onWithdra
               />
             </div>
           </div>
+
+          {inProgress && nextStop && (
+            <p className="mt-2 rounded bg-secondary-fixed px-3 py-2 text-sm text-on-secondary-fixed">
+              {nextStop.type === 'pickup' ? 'Jusqu\'au point de collecte' : 'Jusqu\'à la destination'} :{' '}
+              <strong>{formatKm(nextStop.distance_km)}</strong> · {nextStop.eta_min > 0 ? `environ ${formatDuration(nextStop.eta_min)}` : 'vous y êtes'}
+              {nextStop.order > 1 && <span className="text-xs"> (arrêt n°{nextStop.order} de votre tournée)</span>}
+            </p>
+          )}
 
           {order.recipient_name && (
             <p className="mt-2 text-sm text-on-surface-variant">
@@ -231,8 +238,6 @@ export default function MyOrderCard({ order, busy, onAdvance, onOffer, onWithdra
           Le client a été prévenu que le destinataire est injoignable. Dès qu'il confirme l'être de nouveau, vous pouvez reprendre la remise.
         </p>
       )}
-
-      {status === 'acceptee' && <RevisionRequest order={order} onSubmit={onOffer} onWithdraw={onWithdraw} />}
 
       {conversationOpen && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-outline-variant pt-2 text-sm">
@@ -444,7 +449,7 @@ function ReleaseSheet({ open, order, onClose, onReleased }) {
       }
     >
       <p className="rounded-lg bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">
-        La course sera proposée à d'autres livreurs, au prix fixé par le client, et il sera prévenu. Vous ne pourrez plus la reprendre.
+        La course sera proposée à d'autres livreurs, au prix fixé par LIV corp, et il sera prévenu. Vous ne pourrez plus la reprendre.
         Les désistements répétés peuvent limiter votre accès aux courses.
       </p>
 
@@ -474,50 +479,5 @@ function ReleaseSheet({ open, order, onClose, onReleased }) {
         </p>
       )}
     </Sheet>
-  );
-}
-
-// Avant le retrait du colis, le livreur peut demander un autre prix (colis plus lourd ou plus volumineux que
-// sur la photo). Le client décide ; sans son accord, le prix reste celui convenu.
-export function RevisionRequest({ order, onSubmit, onWithdraw }) {
-  const [open, setOpen] = useState(false);
-  const offer = order.my_offer;
-
-  if (open) {
-    return (
-      <PriceOfferForm
-        order={order}
-        revision
-        initialAmount={offer?.amount}
-        initialMessage={offer?.message}
-        onSubmit={async (amount, message) => {
-          await onSubmit(order.id, amount, message);
-          setOpen(false);
-        }}
-        onCancel={() => setOpen(false)}
-      />
-    );
-  }
-
-  if (offer?.status === 'pending') {
-    return (
-      <div className="rounded bg-primary-fixed px-3 py-2 text-sm text-on-primary-fixed-variant">
-        Demande de nouveau prix : <strong>{formatFcfa(offer.amount)}</strong>, en attente de la réponse du client.
-        <span className="mt-1 flex gap-4 font-semibold">
-          <button type="button" onClick={() => setOpen(true)} className="underline">
-            Modifier
-          </button>
-          <button type="button" onClick={() => onWithdraw(order.id)} className="underline">
-            Retirer
-          </button>
-        </span>
-      </div>
-    );
-  }
-
-  return (
-    <button type="button" onClick={() => setOpen(true)} className="self-start text-sm font-semibold text-secondary underline">
-      Demander une révision du prix
-    </button>
   );
 }

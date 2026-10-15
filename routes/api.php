@@ -6,9 +6,18 @@ use App\Http\Controllers\Api\Admin\ContactMessageController as AdminContactMessa
 use App\Http\Controllers\Api\Admin\DashboardController;
 use App\Http\Controllers\Api\Admin\DelivererValidationController;
 use App\Http\Controllers\Api\Admin\DisputeController;
+use App\Http\Controllers\Api\Admin\DelivererController as AdminDelivererController;
+use App\Http\Controllers\Api\Admin\FinanceController;
+use App\Http\Controllers\Api\Admin\OrderController as AdminOrderController;
+use App\Http\Controllers\Api\Admin\TariffController;
+use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\Auth\AuthController;
+use App\Http\Controllers\Api\Auth\PasswordResetController;
 use App\Http\Controllers\Api\Client\OrderController as ClientOrderController;
-use App\Http\Controllers\Api\Client\OfferController as ClientOfferController;
+use App\Http\Controllers\Api\AvatarController;
+use App\Http\Controllers\Api\Client\FavoriteDelivererController;
+use App\Http\Controllers\Api\Client\RecipientController;
+use App\Http\Controllers\Api\Client\TeamController;
 use App\Http\Controllers\Api\Client\PaymentController;
 use App\Http\Controllers\Api\Client\ReviewController as ClientReviewController;
 use App\Http\Controllers\Api\ContactMessageController;
@@ -16,12 +25,14 @@ use App\Http\Controllers\Api\Deliverer\AvailabilityController;
 use App\Http\Controllers\Api\Client\DeliveryController as ClientDeliveryController;
 use App\Http\Controllers\Api\Deliverer\DeliveryController as DelivererDeliveryController;
 use App\Http\Controllers\Api\Deliverer\DocumentController;
-use App\Http\Controllers\Api\Deliverer\OfferController as DelivererOfferController;
 use App\Http\Controllers\Api\Deliverer\OrderController as DelivererOrderController;
+use App\Http\Controllers\Api\Deliverer\RoutePlanController;
 use App\Http\Controllers\Api\Deliverer\ReviewController as DelivererReviewController;
 use App\Http\Controllers\Api\Deliverer\WalletController;
 use App\Http\Controllers\Api\MarketplaceController;
 use App\Http\Controllers\Api\OrderMessageController;
+use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\SavedAddressController;
 use App\Http\Controllers\Api\OrderPhotoController;
 use App\Http\Controllers\Api\PushSubscriptionController;
 use App\Http\Controllers\Api\Merchant\OrderController as MerchantOrderController;
@@ -44,6 +55,8 @@ Route::prefix('v1')->group(function () {
     // ce plafond par IP ne sert qu'à freiner un balayage massif, sans pénaliser
     // plusieurs utilisateurs derrière la même box ou le même réseau mobile.
     Route::post('/auth/login', [AuthController::class, 'login'])->middleware('throttle:30,1');
+    Route::post('/auth/forgot-password', [PasswordResetController::class, 'forgot'])->middleware('throttle:5,1');
+    Route::post('/auth/reset-password', [PasswordResetController::class, 'reset'])->middleware('throttle:10,1');
 
     // Connexion de l'espace administrateur : point d'entrée distinct de la connexion publique.
     Route::post('/admin/auth/login', [AdminAuthController::class, 'login'])->middleware('throttle:20,1');
@@ -71,6 +84,11 @@ Route::prefix('v1')->group(function () {
         Route::get('/deliverers', [MarketplaceController::class, 'deliverers']);
     })->middleware('throttle:60,1');
 
+    // Photo de profil : URL signée temporaire remise par l'API (cf. User::avatar_url).
+    Route::get('/avatars/{user}', [AvatarController::class, 'show'])
+        ->middleware('signed')
+        ->name('avatars.show');
+
     // Photo d'un colis : URL signée temporaire remise par l'API (cf. Order::photo_url).
     Route::get('/orders/{order}/photo', [OrderPhotoController::class, 'show'])
         ->middleware('signed')
@@ -95,17 +113,36 @@ Route::prefix('v1')->group(function () {
         });
         Route::get('/auth/me', [AuthController::class, 'me']);
 
+        // Profil et adresses enregistrées : communs à tous les rôles.
+        Route::patch('/profile', [ProfileController::class, 'update']);
+        Route::post('/profile/avatar', [AvatarController::class, 'store'])->middleware('throttle:20,1');
+        Route::delete('/profile/avatar', [AvatarController::class, 'destroy']);
+        Route::put('/profile/password', [ProfileController::class, 'updatePassword'])->middleware('throttle:10,1');
+        Route::get('/addresses', [SavedAddressController::class, 'index']);
+        Route::post('/addresses', [SavedAddressController::class, 'store'])->middleware('throttle:30,1');
+        Route::delete('/addresses/{address}', [SavedAddressController::class, 'destroy']);
+
         // ===== CLIENT =====
         Route::middleware(['role:client', 'verified.email'])->prefix('client')->group(function () {
             Route::get('/orders', [ClientOrderController::class, 'index']);
             Route::post('/orders/estimate', [ClientOrderController::class, 'estimate']);
+            Route::delete('/orders/{order}', [ClientOrderController::class, 'hide']);
             Route::post('/orders/{order}/cancel', [ClientOrderController::class, 'cancel'])->middleware('throttle:20,1');
             Route::post('/orders/{order}/retry-delivery', [ClientDeliveryController::class, 'retry'])->middleware('throttle:10,1');
             Route::post('/orders', [ClientOrderController::class, 'store']);
+            Route::post('/orders/batch', [ClientOrderController::class, 'storeBatch'])->middleware('throttle:10,1');
+            Route::get('/stats', [ClientOrderController::class, 'stats']);
+            Route::get('/team', [TeamController::class, 'index']);
+            Route::post('/team', [TeamController::class, 'store'])->middleware('throttle:20,1');
+            Route::patch('/team/{member}', [TeamController::class, 'update']);
+            Route::get('/favorites', [FavoriteDelivererController::class, 'index']);
+            Route::post('/orders/{order}/favorite', [FavoriteDelivererController::class, 'store']);
+            Route::delete('/favorites/{deliverer}', [FavoriteDelivererController::class, 'destroy']);
+            Route::get('/recipients', [RecipientController::class, 'index']);
+            Route::post('/recipients', [RecipientController::class, 'store'])->middleware('throttle:60,1');
+            Route::delete('/recipients/{recipient}', [RecipientController::class, 'destroy']);
             Route::get('/orders/{order}', [ClientOrderController::class, 'show']);
             Route::get('/orders/{order}/track', [ClientOrderController::class, 'track']);
-            Route::post('/orders/{order}/offers/{offer}/accept', [ClientOfferController::class, 'accept'])->scopeBindings();
-            Route::post('/orders/{order}/offers/{offer}/decline', [ClientOfferController::class, 'decline'])->scopeBindings();
             Route::post('/orders/{order}/payment', [PaymentController::class, 'store'])->middleware('throttle:20,1');
             Route::post('/orders/{order}/review', [ClientReviewController::class, 'store'])->middleware('throttle:20,1');
         });
@@ -117,14 +154,13 @@ Route::prefix('v1')->group(function () {
 
         // 'deliverer.verified' bloque tout accès tant que l'admin n'a pas validé le compte
         Route::middleware(['role:livreur', 'verified.email', 'deliverer.verified'])->prefix('deliverer')->group(function () {
+            Route::get('/route-plan', [RoutePlanController::class, 'show'])->middleware('throttle:30,1');
             Route::patch('/availability', [AvailabilityController::class, 'update']);
             Route::get('/wallet', [WalletController::class, 'show']);
             Route::patch('/wallet/mobile-money', [WalletController::class, 'updateMobileMoney']);
             Route::get('/reviews', [DelivererReviewController::class, 'index']);
             Route::get('/orders/available', [DelivererOrderController::class, 'available']);
             Route::get('/orders/mine', [DelivererOrderController::class, 'myOrders']);
-            Route::post('/orders/{order}/offer', [DelivererOfferController::class, 'store'])->middleware('throttle:30,1');
-            Route::delete('/orders/{order}/offer', [DelivererOfferController::class, 'destroy']);
             Route::post('/orders/{order}/accept', [DelivererOrderController::class, 'accept']);
             Route::post('/orders/{order}/arrived', [DelivererDeliveryController::class, 'arrived'])->middleware('throttle:20,1');
             Route::post('/orders/{order}/deliver', [DelivererDeliveryController::class, 'deliver'])->middleware('throttle:20,1');
@@ -151,6 +187,23 @@ Route::prefix('v1')->group(function () {
             Route::post('/deliverers/{deliverer}/approve', [DelivererValidationController::class, 'approve']);
             Route::post('/deliverers/{deliverer}/reject', [DelivererValidationController::class, 'reject']);
             Route::get('/documents/{document}', [DelivererValidationController::class, 'document']);
+
+            Route::get('/deliverers', [AdminDelivererController::class, 'index']);
+            Route::get('/deliverers/{deliverer}', [AdminDelivererController::class, 'show'])->whereNumber('deliverer');
+            Route::get('/users', [AdminUserController::class, 'index']);
+            Route::patch('/users/{user}', [AdminUserController::class, 'update']);
+            Route::put('/users/{user}/tariff', [AdminUserController::class, 'setTariff']);
+            Route::delete('/users/{user}/tariff', [AdminUserController::class, 'clearTariff']);
+            Route::get('/orders', [AdminOrderController::class, 'index']);
+            Route::post('/orders/{order}/cancel', [AdminOrderController::class, 'cancel']);
+            Route::get('/finance/summary', [FinanceController::class, 'summary']);
+            Route::get('/finance/commissions', [FinanceController::class, 'commissions']);
+            Route::get('/finance/payouts', [FinanceController::class, 'payouts']);
+            Route::post('/finance/payouts/run', [FinanceController::class, 'runPayouts'])->middleware('throttle:5,1');
+            Route::get('/finance/settings', [FinanceController::class, 'settings']);
+            Route::put('/finance/settings', [FinanceController::class, 'updateSettings']);
+            Route::get('/tariff', [TariffController::class, 'show']);
+            Route::put('/tariff', [TariffController::class, 'update']);
 
             Route::get('/messages', [AdminContactMessageController::class, 'index']);
             Route::patch('/messages/{contactMessage}/status', [AdminContactMessageController::class, 'updateStatus']);

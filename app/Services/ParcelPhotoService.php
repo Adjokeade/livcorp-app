@@ -48,6 +48,36 @@ class ParcelPhotoService
         return $path;
     }
 
+    /**
+     * Photo de profil : recadrée au carré (centre de l'image) et réduite à 512 px, ré-encodée en JPEG
+     * comme les photos de colis (pas d'original, pas d'EXIF).
+     */
+    public function storeAvatar(UploadedFile $file): string
+    {
+        $image = @imagecreatefromstring((string) file_get_contents($file->getRealPath()));
+
+        if ($image === false) {
+            throw ValidationException::withMessages(['avatar' => 'Cette photo est illisible. Essayez une autre image.']);
+        }
+
+        $image = $this->orient($image, $file->getRealPath());
+        $side = min(imagesx($image), imagesy($image));
+        $size = min(512, $side);
+
+        $canvas = imagecreatetruecolor($size, $size);
+        imagefill($canvas, 0, 0, imagecolorallocate($canvas, 255, 255, 255));
+        imagecopyresampled($canvas, $image, 0, 0, (int) ((imagesx($image) - $side) / 2), (int) ((imagesy($image) - $side) / 2), $size, $size, $side, $side);
+
+        ob_start();
+        imagejpeg($canvas, null, 85);
+        $jpeg = (string) ob_get_clean();
+
+        $path = 'avatars/'.Str::uuid().'.jpg';
+        Storage::disk('parcel_photos')->put($path, $jpeg);
+
+        return $path;
+    }
+
     public function delete(?string $path): void
     {
         if ($path) {

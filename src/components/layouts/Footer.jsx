@@ -50,7 +50,7 @@ export default function Footer() {
         className="pointer-events-none absolute -right-20 bottom-8 h-56 w-56 rounded-full bg-primary/15 blur-3xl motion-safe:animate-float"
       />
 
-      <div className="relative mx-auto grid max-w-[1200px] gap-10 px-4 py-12 sm:grid-cols-2 sm:px-10 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
+      <div className="relative mx-auto grid grid-cols-1 max-w-[1200px] gap-10 px-4 py-12 sm:grid-cols-2 sm:px-10 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
         <Reveal>
           <Link to="/" className="flex w-fit items-baseline gap-0.5 font-display text-2xl font-extrabold transition duration-200 hover:scale-105">
             <span className="text-primary">LIV</span>

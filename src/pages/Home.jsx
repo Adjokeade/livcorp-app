@@ -173,13 +173,13 @@ function Services() {
     },
     {
       image: serviceVipPhoto,
-      imageAlt: "Des mains dénouent le ruban noir d'un paquet cadeau blanc",
+      imageAlt: "Un homme d'affaires élégant au téléphone dans une rue de Dakar, un taxi jaune derrière lui",
       title: 'Conciergerie VIP',
       text: 'Le traitement de vos courses importantes, en toute discrétion et sécurité.',
     },
     {
       image: serviceSurMesurePhoto,
-      imageAlt: "Un livreur consulte sa tablette devant des cartons empilés",
+      imageAlt: "Un manutentionnaire souriant en gilet orange porte un carton dans un entrepôt de Lagos, devant des piles de cartons",
       title: 'Service sur-mesure',
       text: 'Des solutions logistiques personnalisées, adaptées à vos besoins spécifiques.',
     },
@@ -210,7 +210,7 @@ function ServiceGroup({ badge, badgeClass, accent, items, className = '' }) {
       <Reveal variant="left">
         <span className={`inline-block rounded-lg px-4 py-2 text-sm font-semibold ${badgeClass}`}>{badge}</span>
       </Reveal>
-      <div className="mt-6 grid gap-6 sm:grid-cols-3">
+      <div className="mt-6 grid grid-cols-1 gap-6 sm:grid-cols-3">
         {items.map((item, index) => (
           <Reveal key={item.title} delay={index * 120} className="h-full">
             <Card hover className="group flex h-full flex-col overflow-hidden !p-0">
@@ -282,7 +282,7 @@ function Profiles() {
           </p>
         </Reveal>
 
-        <div className="mt-10 grid gap-6 text-left sm:grid-cols-3">
+        <div className="mt-10 grid grid-cols-1 gap-6 text-left sm:grid-cols-3">
           <ProfileCard
             delay={0}
             image={profileParticulierPhoto}

@@ -1,20 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import delivererService from '../../services/delivererService';
 import useAuthStore from '../../store/useAuthStore';
 import Button from '../../components/common/Button';
+import Card from '../../components/common/Card';
+import AvatarUploader from '../../components/common/AvatarUploader';
 import TrustBadge from '../../components/common/TrustBadge';
 import Spinner from '../../components/common/Spinner';
 import PendingValidation from '../../components/deliverer/PendingValidation';
 import WalletPanel from '../../components/deliverer/WalletPanel';
 import ReviewsPanel from '../../components/deliverer/ReviewsPanel';
-import AnnouncementCard from '../../components/announcements/AnnouncementCard';
+import DeliveryRequestCard, { fromDelivererOrder } from '../../components/announcements/DeliveryRequestCard';
 import AvailableOrderSheet from '../../components/deliverer/AvailableOrderSheet';
 import useDetailParam from '../../hooks/useDetailParam';
 import useLiveLocation from '../../hooks/useLiveLocation';
 import LiveLocationBanner from '../../components/deliverer/LiveLocationBanner';
 import MyOrderCard from '../../components/deliverer/MyOrderCard';
-import { formatDuration, formatFcfa, formatKm, shortPlace, timeAgo } from '../../lib/format';
+import RoutePlanPanel from '../../components/deliverer/RoutePlanPanel';
+import { shortPlace } from '../../lib/format';
 
 const NEXT_STATUS = {
   acceptee: { next: 'colis_recupere', label: "J'ai récupéré le colis" },
@@ -25,22 +28,22 @@ const NEXT_STATUS = {
 export default function DelivererDashboard() {
   const { user, refreshUser } = useAuthStore();
   const approved = user?.deliverer?.verification_status === 'approved';
+  // Sans photo de profil, le serveur refuse l'accès aux courses : on la demande avant tout appel.
+  const needsAvatar = approved && !user?.avatar_url;
   const detail = useDetailParam();
   // Une notification de message ouvre "?chat=<id de la course>" : on va sur "Mes courses" et on ouvre la discussion.
   const [searchParams, setSearchParams] = useSearchParams();
   const [chatOrderId, setChatOrderId] = useState(() => searchParams.get('chat'));
-  const [tab, setTab] = useState(chatOrderId ? 'mine' : 'available'); // 'available' | 'mine' | 'wallet' | 'reviews'
+  const [tab, setTab] = useState(chatOrderId || searchParams.get('onglet') === 'mine' ? 'mine' : 'available'); // 'available' | 'mine' | 'wallet' | 'reviews'
   const [available, setAvailable] = useState(null);
   const [mine, setMine] = useState(null);
   const [isOnline, setIsOnline] = useState(false);
   const [togglingOnline, setTogglingOnline] = useState(false);
   const [onlineError, setOnlineError] = useState('');
   const [busyOrderId, setBusyOrderId] = useState(null);
+  const [plan, setPlan] = useState(null); // itinéraire : arrêts, distance et durée depuis ma position
   const [loadError, setLoadError] = useState('');
   const [actionError, setActionError] = useState('');
-  const [notice, setNotice] = useState(null); // { text }
-  const knownMineIds = useRef(null); // null tant que la première lecture n'est pas faite
-  const acceptedByMe = useRef(new Set());
 
   // Position partagée avec le client tant qu'une course est en cours (départ puis destination), qu'on soit
   // "disponible" ou non : le client suit son colis, c'est la raison d'être de ce partage.
@@ -56,14 +59,6 @@ export default function DelivererDashboard() {
       setMine(m.data ?? []);
       setLoadError('');
 
-      // Une course qui apparaît dans "Mes courses" sans que le livreur l'ait acceptée directement :
-      // le client vient d'accepter sa proposition de prix. On le prévient, quel que soit l'onglet ouvert.
-      const ids = new Set((m.data ?? []).map((o) => o.id));
-      if (knownMineIds.current) {
-        const accepted = (m.data ?? []).find((o) => !knownMineIds.current.has(o.id) && !acceptedByMe.current.has(o.id));
-        if (accepted) setNotice({ text: `Le client a accepté votre proposition pour la course #${accepted.reference}.` });
-      }
-      knownMineIds.current = ids;
     } catch (err) {
       setAvailable((prev) => prev ?? []);
       setMine((prev) => prev ?? []);
@@ -77,8 +72,8 @@ export default function DelivererDashboard() {
   }, [refreshUser]);
 
   useEffect(() => {
-    if (approved) refresh();
-  }, [approved]);
+    if (approved && !needsAvatar) refresh();
+  }, [approved, needsAvatar]);
 
   useEffect(() => {
     if (searchParams.has('chat')) {
@@ -92,15 +87,15 @@ export default function DelivererDashboard() {
     setMine((prev) => prev?.map((o) => (o.id === orderId && o.unread_messages_count > 0 ? { ...o, unread_messages_count: 0 } : o)) ?? prev);
   }
 
-  // Nouvelles courses et réponses du client aux propositions de prix : relecture discrète toutes les
+  // Nouvelles courses : relecture discrète toutes les
   // 8 s, seulement quand l'onglet est visible.
   useEffect(() => {
-    if (!approved) return undefined;
+    if (!approved || needsAvatar) return undefined;
     const timer = setInterval(() => {
       if (!document.hidden) refresh();
     }, 8000);
     return () => clearInterval(timer);
-  }, [approved]);
+  }, [approved, needsAvatar]);
 
   // Tant qu'une livraison attend le paiement du client, on relit les courses toutes les 3 s :
   // le livreur voit le statut du paiement dès que le client le valide, sans rien recharger.
@@ -162,25 +157,9 @@ export default function DelivererDashboard() {
     );
   }
 
-  async function handleOffer(orderId, amount, message) {
-    await delivererService.offer(orderId, amount, message);
-    await refresh();
-  }
-
-  async function handleWithdrawOffer(orderId) {
-    setActionError('');
-    try {
-      await delivererService.withdrawOffer(orderId);
-      await refresh();
-    } catch (err) {
-      setActionError(err.response?.data?.message ?? 'Impossible de retirer la proposition.');
-    }
-  }
-
   async function handleAccept(orderId) {
     setBusyOrderId(orderId);
     setActionError('');
-    acceptedByMe.current.add(orderId);
     try {
       await delivererService.accept(orderId);
       await refresh();
@@ -225,6 +204,23 @@ export default function DelivererDashboard() {
     return <PendingValidation user={user} onRefresh={refreshUser} />;
   }
 
+  if (needsAvatar) {
+    return (
+      <div className="mx-auto max-w-xl">
+        <h1 className="font-display text-2xl font-bold">Bonjour, {user?.first_name}</h1>
+        <Card className="mt-6">
+          <h2 className="font-display text-lg font-bold">Ajoutez votre photo de profil</h2>
+          <p className="mt-2 text-sm text-on-surface-variant">
+            Votre compte est validé. Dernière étape avant d'accepter des courses : vos clients doivent pouvoir vous reconnaître.
+          </p>
+          <div className="mt-5">
+            <AvatarUploader user={user} required />
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
   if (!available || !mine) {
     return (
       <div className="flex min-h-[40vh] items-center justify-center">
@@ -259,27 +255,6 @@ export default function DelivererDashboard() {
 
       <LiveLocationBanner state={liveLocation} courseCount={activeCourseIds.length} />
 
-      {notice && (
-        <div role="status" className="mt-4 flex items-start justify-between gap-3 rounded bg-secondary-fixed px-3 py-2 text-sm text-on-secondary-fixed">
-          <p>{notice.text}</p>
-          <span className="flex flex-shrink-0 gap-3 font-semibold">
-            <button
-              type="button"
-              className="underline"
-              onClick={() => {
-                setTab('mine');
-                setNotice(null);
-              }}
-            >
-              Voir
-            </button>
-            <button type="button" aria-label="Fermer" onClick={() => setNotice(null)}>
-              ×
-            </button>
-          </span>
-        </div>
-      )}
-
       {actionError && (
         <p role="alert" className="mt-4 rounded bg-error-container px-3 py-2 text-sm text-on-error-container">
           {actionError}
@@ -292,7 +267,7 @@ export default function DelivererDashboard() {
         </p>
       )}
 
-      <div className="mt-6 flex flex-wrap gap-x-5 gap-y-1 border-b border-outline-variant">
+      <div className="-mx-4 mt-6 flex gap-x-5 overflow-x-auto border-b border-outline-variant px-4 sm:mx-0 sm:px-0">
         <TabButton active={tab === 'available'} onClick={() => setTab('available')}>
           Courses disponibles ({available.length})
         </TabButton>
@@ -314,35 +289,16 @@ export default function DelivererDashboard() {
           (available.length === 0 ? (
             <p className="text-on-surface-variant">Aucune course disponible pour le moment.</p>
           ) : (
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {available.map((order) => (
-                <AnnouncementCard
-                  key={order.id}
-                  title={`${shortPlace(order.pickup_address)} → ${shortPlace(order.dropoff_address)}`}
-                  meta={[formatKm(order.distance_km), order.duration_min && formatDuration(order.duration_min), timeAgo(order.created_at)]
-                    .filter(Boolean)
-                    .join(' · ')}
-                  description={order.package_type}
-                  photoUrl={order.photo_url}
-                  photoNote={order.type === 'course' ? 'Course à effectuer' : 'Sans photo'}
-                  chips={[
-                    { label: order.type === 'course' ? 'Course' : 'Colis' },
-                    ...(order.urgency === 'express' ? [{ label: 'Express', tone: 'primary' }] : []),
-                  ]}
-                  corner={
-                    order.my_offer?.status === 'pending' ? (
-                      <span className="rounded-full bg-secondary px-2.5 py-1 text-xs font-bold text-on-secondary shadow-sm">Proposition envoyée</span>
-                    ) : order.my_offer?.status === 'declined' ? (
-                      <span className="rounded-full bg-error px-2.5 py-1 text-xs font-bold text-on-error shadow-sm">Proposition refusée</span>
-                    ) : null
-                  }
-                  price={order.price}
-                  priceNote={`gain estimé ${formatFcfa(order.estimated_earnings)}`}
-                  onOpen={() => detail.open(order.id)}
-                />
+                <DeliveryRequestCard key={order.id} request={fromDelivererOrder(order, shortPlace)} onOpen={() => detail.open(order.id)} />
               ))}
             </div>
           ))}
+
+        {tab === 'mine' && activeCourseIds.length > 0 && (
+          <RoutePlanPanel coords={liveLocation.coords} orderIdsKey={activeCourseIds.join(',')} onUpdate={setPlan} />
+        )}
 
         {tab === 'mine' &&
           (mine.length === 0 ? (
@@ -352,10 +308,9 @@ export default function DelivererDashboard() {
               <MyOrderCard
                 key={order.id}
                 order={order}
+                nextStop={plan?.stops.find((s) => s.order_id === order.id) ?? null}
                 busy={busyOrderId === order.id}
                 onAdvance={handleAdvanceStatus}
-                onOffer={handleOffer}
-                onWithdraw={handleWithdrawOffer}
                 onChanged={refresh}
                 onMessagesRead={markMessagesRead}
                 autoOpenChat={chatOrderId === String(order.id)}
@@ -374,8 +329,6 @@ export default function DelivererDashboard() {
         onAccept={async (orderId) => {
           if (await handleAccept(orderId)) detail.close();
         }}
-        onOffer={handleOffer}
-        onWithdraw={handleWithdrawOffer}
       />
     </div>
   );

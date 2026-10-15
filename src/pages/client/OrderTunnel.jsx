@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import useOrderDraftStore from '../../store/useOrderDraftStore';
 import clientOrderService from '../../services/clientOrderService';
+import profileService from '../../services/profileService';
 import { reverseGeocode } from '../../lib/geocoding';
 import { formatDuration, formatFcfa, formatKm } from '../../lib/format';
 import Card from '../../components/common/Card';
@@ -10,10 +11,11 @@ import Button from '../../components/common/Button';
 import AddressField from '../../components/client/AddressField';
 import RouteMap from '../../components/client/RouteMap';
 import PhotoField from '../../components/client/PhotoField';
+import FavoritesFirstOption from '../../components/client/FavoritesFirstOption';
 import PhotoViewer from '../../components/common/PhotoViewer';
 
 // Tunnel de commande client en trois étapes : trajet (adresses localisées sur une carte),
-// colis et prix (photo, destinataire, prix fixé par le client), récapitulatif.
+// colis et prix (photo, destinataire, prix imposé selon la distance), récapitulatif.
 const STEPS = ['Trajet', 'Colis et prix', 'Récapitulatif'];
 const STEP_OF_FIELD = {
   pickup_address: 0, pickup_lat: 0, pickup_lng: 0, dropoff_address: 0, dropoff_lat: 0, dropoff_lng: 0,
@@ -34,15 +36,21 @@ export default function OrderTunnel() {
   const [fieldErrors, setFieldErrors] = useState({});
   const [error, setError] = useState('');
   const [order, setOrder] = useState(null);
-  // Un prix déjà présent dans le brouillon (retour en arrière) est considéré comme choisi par le client.
-  const [priceTouched, setPriceTouched] = useState(draft.price !== '');
+  const [savedAddresses, setSavedAddresses] = useState([]);
+  const [recipients, setRecipients] = useState([]);
+
+  // Adresses enregistrées : simples raccourcis, le formulaire fonctionne sans.
+  useEffect(() => {
+    profileService.listAddresses().then(setSavedAddresses).catch(() => {});
+    clientOrderService.listRecipients().then(setRecipients).catch(() => {});
+  }, []);
   const reverseCalls = useRef({ pickup: 0, dropoff: 0 });
 
   const pickup = draft.pickupLat != null ? { lat: draft.pickupLat, lng: draft.pickupLng } : null;
   const dropoff = draft.dropoffLat != null ? { lat: draft.dropoffLat, lng: draft.dropoffLng } : null;
   const estimate = draft.estimate;
-  const suggested = estimate?.suggested_prices?.[draft.urgency];
-  const minPrice = estimate?.min_price ?? 500;
+  // Prix imposé par LIV corp selon la distance (tarif négocié de l'entreprise le cas échéant) : le client ne le saisit pas.
+  const price = estimate?.suggested_prices?.[draft.urgency];
 
   // Itinéraire recalculé dès que les deux points sont localisés ou déplacés.
   useEffect(() => {
@@ -79,12 +87,6 @@ export default function OrderTunnel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft.pickupLat, draft.pickupLng, draft.dropoffLat, draft.dropoffLng]);
 
-  // Le prix conseillé pré-remplit le champ tant que le client ne l'a pas modifié lui-même.
-  useEffect(() => {
-    if (suggested && !priceTouched) draft.setField('price', suggested);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [suggested, priceTouched]);
-
   function handleText(kind, text) {
     draft.setField(`${kind}Address`, text);
     draft.setField(`${kind}Lat`, null);
@@ -112,8 +114,6 @@ export default function OrderTunnel() {
     if (draft.type === 'colis' && !draft.photo) errors.photo = 'Ajoutez une photo du colis.';
     if (!draft.recipientName.trim()) errors.recipient_name = 'Indiquez le nom du destinataire.';
     if (!draft.recipientPhone.trim()) errors.recipient_phone = 'Indiquez le téléphone du destinataire.';
-    const price = Number(draft.price);
-    if (!Number.isInteger(price) || price < minPrice) errors.price = `Le prix minimum est de ${formatFcfa(minPrice)}.`;
     return errors;
   }
 
@@ -156,8 +156,6 @@ export default function OrderTunnel() {
   }
 
   const canContinue = Boolean(pickup && dropoff && estimate && !estimating);
-  const price = Number(draft.price);
-  const farBelowSuggestion = suggested && Number.isFinite(price) && price > 0 && price < suggested * 0.6;
 
   if (order) {
     return (
@@ -248,6 +246,7 @@ export default function OrderTunnel() {
                 located={Boolean(pickup)}
                 onTextChange={(text) => handleText('pickup', text)}
                 onSelect={(place) => handleSelect('pickup', place)}
+                savedAddresses={savedAddresses}
                 placeholder="Ex. Marché Dantokpa, Cotonou"
                 error={fieldErrors.pickup_address}
               />
@@ -262,12 +261,35 @@ export default function OrderTunnel() {
             </div>
 
             <div>
+              {recipients.length > 0 && (
+                <div className="mb-3">
+                  <label htmlFor="recipient-book" className="mb-1.5 block text-sm font-semibold">Destinataire du carnet</label>
+                  <select
+                    id="recipient-book"
+                    className="input-field"
+                    value=""
+                    onChange={(e) => {
+                      const r = recipients.find((x) => String(x.id) === e.target.value);
+                      if (!r) return;
+                      handleSelect('dropoff', { address: r.address, lat: r.lat, lng: r.lng });
+                      draft.setField('dropoffDetails', r.details ?? '');
+                      draft.setField('recipientName', r.name);
+                      draft.setField('recipientPhone', r.phone);
+                      setFieldErrors((errs) => ({ ...errs, recipient_name: undefined, recipient_phone: undefined }));
+                    }}
+                  >
+                    <option value="">Choisir dans mon carnet…</option>
+                    {recipients.map((r) => <option key={r.id} value={r.id}>{r.name} · {r.address}</option>)}
+                  </select>
+                </div>
+              )}
               <AddressField
                 label="Destination (B)"
                 value={draft.dropoffAddress}
                 located={Boolean(dropoff)}
                 onTextChange={(text) => handleText('dropoff', text)}
                 onSelect={(place) => handleSelect('dropoff', place)}
+                savedAddresses={savedAddresses}
                 placeholder="Ex. Fidjrossè, Cotonou"
                 near={pickup ?? undefined}
                 error={fieldErrors.dropoff_address}
@@ -398,50 +420,16 @@ export default function OrderTunnel() {
               </div>
             </div>
 
+            <FavoritesFirstOption checked={draft.favoritesFirst} onChange={(v) => draft.setField('favoritesFirst', v)} />
+
             <div className="rounded-lg border border-outline-variant p-4">
-              <Input
-                label="Votre prix (FCFA)"
-                name="price"
-                type="number"
-                inputMode="numeric"
-                min={minPrice}
-                step="50"
-                required
-                value={draft.price}
-                onChange={(e) => {
-                  setPriceTouched(true);
-                  draft.setField('price', e.target.value === '' ? '' : Number(e.target.value));
-                  setFieldErrors((errs) => ({ ...errs, price: undefined }));
-                }}
-                error={fieldErrors.price}
-              />
+              <p className="text-sm font-semibold">Prix de la livraison</p>
+              <p className="mt-1 font-display text-3xl font-extrabold text-primary">{formatFcfa(price)}</p>
               <p className="mt-2 text-sm text-on-surface-variant">
-                Prix conseillé pour {formatKm(estimate.distance_km)} :{' '}
-                <strong className="text-on-surface">{formatFcfa(suggested)}</strong>
-                {Number(draft.price) !== suggested && (
-                  <>
-                    {' '}
-                    <button
-                      type="button"
-                      className="font-semibold text-secondary underline"
-                      onClick={() => {
-                        setPriceTouched(false);
-                        draft.setField('price', suggested);
-                      }}
-                    >
-                      Utiliser
-                    </button>
-                  </>
-                )}
-              </p>
-              {farBelowSuggestion && (
-                <p className="mt-2 rounded bg-primary-fixed px-3 py-2 text-xs text-on-primary-fixed-variant">
-                  Ce prix est bien en dessous du conseillé : moins de livreurs l'accepteront rapidement.
-                </p>
-              )}
-              <p className="mt-2 text-xs text-on-surface-variant">
-                C'est vous qui fixez le prix. Un livreur peut vous proposer un autre montant : vous décidez de
-                l'accepter ou non.
+                {estimate.negotiated_tariff
+                  ? `Tarif négocié de votre entreprise pour ${formatKm(estimate.distance_km)}.`
+                  : `Fixé par LIV corp selon la distance (${formatKm(estimate.distance_km)}).`}{' '}
+                Ce prix est ferme et non négociable.
               </p>
             </div>
 
@@ -465,8 +453,7 @@ export default function OrderTunnel() {
           {draft.photo && <PhotoPreview file={draft.photo} />}
 
           <dl className="mt-5 space-y-3 text-sm">
-            <Row label="Prix fixé" value={formatFcfa(draft.price)} highlight />
-            <Row label="Prix conseillé" value={formatFcfa(suggested)} />
+            <Row label="Prix" value={formatFcfa(price)} highlight />
             <Row
               label="Trajet"
               value={`${formatKm(estimate.distance_km)} · ${formatDuration(estimate.duration_min)}`}

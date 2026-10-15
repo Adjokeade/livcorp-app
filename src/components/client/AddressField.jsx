@@ -4,7 +4,7 @@ import { getCurrentPosition, reverseGeocode, searchPlaces } from '../../lib/geoc
 // Champ d'adresse avec suggestions. Tant que le client n'a pas choisi une suggestion (ou déplacé le
 // repère sur la carte), l'adresse n'est PAS localisée : le parent bloque la suite. C'est ce qui évite
 // d'envoyer un livreur au mauvais "Fidjrossè".
-export default function AddressField({ label, value, located, onTextChange, onSelect, error, placeholder, near }) {
+export default function AddressField({ label, value, located, onTextChange, onSelect, error, placeholder, near, savedAddresses = [] }) {
   const inputId = useId();
   const listId = `${inputId}-list`;
   const [suggestions, setSuggestions] = useState([]);
@@ -116,6 +116,25 @@ export default function AddressField({ label, value, located, onTextChange, onSe
           {gpsBusy ? 'Localisation…' : 'Ma position'}
         </button>
       </div>
+
+      {savedAddresses.length > 0 && (
+        <div className="mb-2 flex flex-wrap gap-2">
+          {savedAddresses.map((a) => (
+            <button
+              type="button"
+              key={a.id}
+              onClick={() => {
+                skipNextSearch.current = true;
+                setOpen(false);
+                onSelect({ address: a.address, lat: a.lat, lng: a.lng });
+              }}
+              className="rounded-full border border-outline-variant px-3 py-1 text-xs font-semibold text-on-surface-variant"
+            >
+              {a.label}
+            </button>
+          ))}
+        </div>
+      )}
 
       <input
         id={inputId}

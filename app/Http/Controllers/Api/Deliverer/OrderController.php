@@ -8,10 +8,10 @@ use App\Http\Requests\Deliverer\PushLocationRequest;
 use App\Http\Requests\Deliverer\UpdateOrderStatusRequest;
 use App\Models\Order;
 use App\Models\TrackingPoint;
+use App\Services\FinanceSettings;
 use App\Services\GeolocationService;
 use App\Services\OrderStatusService;
 use App\Notifications\DelivererNearby;
-use App\Notifications\PriceOfferAnswered;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
@@ -31,42 +31,40 @@ class OrderController extends Controller
     public function available(Request $request)
     {
         $deliverer = $request->user()->deliverer;
-        $rate = (float) config('services.commission.rate_default', 15);
+        $rate = FinanceSettings::commissionRate();
 
         // Gain estimé = prix moins la commission LIV corp. Le champ deliverer_payout, lui,
         // n'est rempli qu'à la livraison : il vaut 0 sur une course encore disponible.
         return Order::where('status', Order::STATUS_CREEE)
             ->whereNull('deliverer_id')
+            ->openTo($deliverer)
             ->whereDoesntHave('releases', fn ($q) => $q->where('deliverer_id', $deliverer->id))
-            ->with(['client:id,first_name', 'offers' => fn ($q) => $q->where('deliverer_id', $deliverer->id)])
-            ->withCount(['offers as offers_count' => fn ($q) => $q->where('status', 'pending')])
+            ->with(['client:id,first_name'])
             ->latest()
             ->paginate(15)
             ->through(fn (Order $order) => [
                 // Le destinataire (nom, téléphone) n'est connu du livreur qu'une fois la course acceptée.
-                ...Arr::except($order->toArray(), ['offers', 'client', 'recipient_name', 'recipient_phone']),
+                ...Arr::except($order->toArray(), ['client', 'recipient_name', 'recipient_phone']),
                 'client_first_name' => $order->client?->first_name,
                 'estimated_earnings' => round($order->price * (1 - $rate / 100), 2),
-                'my_offer' => $order->offers->first()?->only(['id', 'amount', 'message', 'status']),
             ]);
     }
 
     public function myOrders(Request $request)
     {
         $deliverer = $request->user()->deliverer;
-        $rate = (float) config('services.commission.rate_default', 15);
+        $rate = FinanceSettings::commissionRate();
 
         return $deliverer
             ->orders()
-            ->with(['client:id,first_name,phone', 'merchant', 'offers' => fn ($q) => $q->where('deliverer_id', $deliverer->id)->where('status', 'pending')])
+            ->with(['client:id,first_name,phone', 'merchant'])
             ->withCount(['messages as unread_messages_count' => fn ($q) => $q->where('sender_id', '!=', $deliverer->user_id)->whereNull('read_at')->whereColumn('order_messages.deliverer_id', 'orders.deliverer_id')])
             ->latest()
             ->paginate(15)
             ->through(fn (Order $order) => [
                 // Le téléphone du destinataire et du client ne sert que pendant la course.
-                ...Arr::except($order->maskContacts()->toArray(), 'offers'),
+                ...$order->maskContacts()->toArray(),
                 'estimated_earnings' => round($order->price * (1 - $rate / 100), 2),
-                'my_offer' => $order->offers->first()?->only(['id', 'amount', 'message', 'status']),
             ]);
     }
 
@@ -74,15 +72,21 @@ class OrderController extends Controller
     {
         $this->authorize('accept', $order);
 
-        $declined = collect();
         $taken = false;
         $released = false;
 
-        DB::transaction(function () use ($request, &$order, &$declined, &$taken, &$released) {
+        DB::transaction(function () use ($request, &$order, &$taken, &$released) {
             // Verrou : deux livreurs qui touchent "Accepter" en même temps, ou un client qui annule au même
             // instant, ne doivent pas produire d'erreur ni de double attribution.
             $order = Order::whereKey($order->id)->lockForUpdate()->firstOrFail();
             if ($order->status !== Order::STATUS_CREEE || $order->deliverer_id !== null) {
+                $taken = true;
+
+                return;
+            }
+
+            // Course encore réservée aux livreurs favoris du client : elle n'est pas (encore) disponible.
+            if (! $order->isOpenTo($request->user()->deliverer)) {
                 $taken = true;
 
                 return;
@@ -97,10 +101,6 @@ class OrderController extends Controller
             $order->deliverer_id = $request->user()->deliverer->id;
             $order->save();
 
-            // Course prise au prix demandé : les propositions des autres livreurs tombent.
-            $declined = $order->offers()->where('status', 'pending')->get();
-            $order->offers()->where('status', 'pending')->update(['status' => 'declined']);
-
             $this->statusService->transitionTo($order, Order::STATUS_ACCEPTEE);
         });
 
@@ -112,10 +112,6 @@ class OrderController extends Controller
             return response()->json([
                 'message' => "Cette course n'est plus disponible : elle a été prise par un autre livreur ou annulée.",
             ], 409);
-        }
-
-        foreach ($declined as $offer) {
-            rescue(fn () => $offer->deliverer->user->notify(new PriceOfferAnswered($offer->load('order'), 'declined')));
         }
 
         return $order->fresh(['client:id,first_name,phone'])->maskContacts();
@@ -160,11 +156,24 @@ class OrderController extends Controller
         $deliverer = $request->user()->deliverer;
         $validated = $request->validated();
 
+        // Saut de position impossible (plus de 250 km/h depuis le dernier point, récent) : lecture GPS aberrante,
+        // souvent après un passage en tunnel ou sous un immeuble. On ne la propage pas au client.
+        $previous = TrackingPoint::where('deliverer_id', $deliverer->id)->latest('recorded_at')->first();
+        if ($previous && $previous->recorded_at->gt(now()->subSeconds(120))) {
+            $seconds = max(1, now()->timestamp - $previous->recorded_at->timestamp);
+            $km = $this->geo->distanceInKm((float) $previous->lat, (float) $previous->lng, (float) $validated['lat'], (float) $validated['lng']);
+
+            if ($km / ($seconds / 3600) > 250 && $km > 0.2) {
+                return response()->json(['message' => 'Position ignorée (saut improbable).', 'ignored' => true]);
+            }
+        }
+
         $point = TrackingPoint::create([
             'order_id' => $order->id,
             'deliverer_id' => $deliverer->id,
             'lat' => $validated['lat'],
             'lng' => $validated['lng'],
+            'accuracy_m' => isset($validated['accuracy']) ? (int) round($validated['accuracy']) : null,
             'recorded_at' => now(),
         ]);
 

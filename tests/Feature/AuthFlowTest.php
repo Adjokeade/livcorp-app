@@ -148,4 +148,18 @@ class AuthFlowTest extends TestCase
             'id_card' => UploadedFile::fake()->image('cni.png'),
         ])->assertForbidden();
     }
+
+    public function test_login_refuses_a_category_that_does_not_match_the_account(): void
+    {
+        $this->postJson('/api/v1/auth/register', $this->particulier())->assertCreated();
+        $creds = ['email' => 'awa@test.bj', 'password' => 'Passw0rdX'];
+
+        $this->postJson('/api/v1/auth/login', $creds + ['category' => 'livreur'])
+            ->assertUnprocessable()
+            ->assertJsonMissingPath('token');
+        $this->postJson('/api/v1/auth/login', $creds + ['category' => 'entreprise'])->assertUnprocessable();
+
+        $this->postJson('/api/v1/auth/login', $creds + ['category' => 'particulier'])->assertOk()->assertJsonStructure(['token']);
+        $this->postJson('/api/v1/auth/login', $creds)->assertOk();
+    }
 }

@@ -54,10 +54,10 @@ const useAuthStore = create((set, get) => ({
     set({ user: null, status: 'guest' });
   },
 
-  async login(email, password) {
+  async login(email, password, category) {
     set({ status: 'loading', error: null });
     try {
-      const { data } = await api.post('/auth/login', { email, password });
+      const { data } = await api.post('/auth/login', { email, password, category });
       localStorage.setItem('livcorp_token', data.token);
       set({ user: data.user, token: data.token, status: 'authenticated' });
       syncPushSubscription();
@@ -127,6 +127,11 @@ const useAuthStore = create((set, get) => ({
     } catch {
       return null;
     }
+  },
+
+  // Remplace le profil en mémoire (après une modification du profil par exemple).
+  setUser(user) {
+    set({ user });
   },
 
   async resendVerification() {

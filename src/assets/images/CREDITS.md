@@ -10,5 +10,5 @@ recadrées en 16:10, réduites à 800 px de large et débarrassées de leurs mé
 | `service-coursiers.jpg` | https://www.pexels.com/photo/motorcycle-delivery-in-nairobi-street-scene-30661401/ (MC G'Zay) |
 | `service-conciergerie.jpg` | https://www.pexels.com/photo/reception-desk-with-antique-hotel-bell-3771110/ (Andrea Piacquadio) |
 | `service-suivi.jpg` | https://www.pexels.com/photo/hand-holding-smartphone-with-gps-map-display-30403062/ (Amar Preciado) |
-| `service-vip.jpg` | https://www.pexels.com/photo/person-holding-white-and-black-gift-box-5872179/ |
-| `service-sur-mesure.jpg` | https://www.pexels.com/photo/man-in-white-polo-shirt-using-a-tablet-computer-5025643/ |
+| `service-vip.jpg` | https://www.pexels.com/photo/man-in-blue-suit-talking-on-the-phone-12179670/ (homme d'affaires à Dakar, Sénégal) |
+| `service-sur-mesure.jpg` | https://www.pexels.com/photo/smiling-man-working-in-a-warehouse-holding-boxes-8069548/ (entrepôt de la Lagos Food Bank Initiative, Nigeria) |

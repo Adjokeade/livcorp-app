@@ -36,19 +36,19 @@ const delivererService = {
 
   unreachable: (orderId) => api.post(`/deliverer/orders/${orderId}/unreachable`).then((r) => r.data.order),
 
-  // Contre-proposition de prix (course libre) ou demande de révision (course acceptée, avant retrait).
-  offer: (orderId, amount, message) =>
-    api.post(`/deliverer/orders/${orderId}/offer`, { amount, message: message || null }).then((r) => r.data),
-  withdrawOffer: (orderId) => api.delete(`/deliverer/orders/${orderId}/offer`).then((r) => r.data),
-
   accept: (orderId) => api.post(`/deliverer/orders/${orderId}/accept`).then((r) => r.data),
 
   // status ∈ colis_recupere | en_cours_livraison | livree — cf. UpdateOrderStatusRequest
   updateStatus: (orderId, status, note) =>
     api.patch(`/deliverer/orders/${orderId}/status`, { status, note }).then((r) => r.data),
 
-  pushLocation: (orderId, lat, lng) =>
-    api.post(`/deliverer/orders/${orderId}/location`, { lat, lng }).then((r) => r.data),
+  // `accuracy` : précision du GPS en mètres (facultative), gardée côté serveur pour repérer les mauvaises positions.
+  pushLocation: (orderId, lat, lng, accuracy) =>
+    api.post(`/deliverer/orders/${orderId}/location`, { lat, lng, ...(accuracy != null ? { accuracy } : {}) }).then((r) => r.data),
+
+  // Itinéraire : mes arrêts dans l'ordre (collecte des colis à prendre, destination de chaque colis), avec la distance
+  // et la durée jusqu'à chacun depuis ma position. Sans position fournie, le serveur prend ma dernière connue.
+  routePlan: (coords) => api.get('/deliverer/route-plan', { params: coords ?? {} }).then((r) => r.data),
 
   // Portefeuille : solde, gains par course, versements, numéro Mobile Money.
   wallet: () => api.get('/deliverer/wallet').then((r) => r.data),

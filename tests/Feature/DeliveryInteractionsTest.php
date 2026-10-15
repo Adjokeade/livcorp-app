@@ -6,7 +6,6 @@ use App\Models\Commission;
 use App\Models\Dispute;
 use App\Models\Order;
 use App\Models\OrderRelease;
-use App\Models\PriceOffer;
 use App\Models\TrackingPoint;
 use App\Notifications\DelivererArrived;
 use App\Notifications\DeliveryCodeLocked;
@@ -425,13 +424,12 @@ class DeliveryInteractionsTest extends TestCase
         ]);
     }
 
-    public function test_a_deliverer_who_released_cannot_take_or_bid_on_the_course_again(): void
+    public function test_a_deliverer_who_released_cannot_take_the_course_again(): void
     {
         [, $deliverer, $order] = $this->course(Order::STATUS_ACCEPTEE);
         $this->actingAs($deliverer->user, 'sanctum')->postJson("/api/v1/deliverer/orders/{$order->id}/release", ['reason' => 'trop_loin'])->assertOk();
 
         $this->postJson("/api/v1/deliverer/orders/{$order->id}/accept")->assertStatus(409);
-        $this->postJson("/api/v1/deliverer/orders/{$order->id}/offer", ['amount' => 4000])->assertStatus(409);
         $this->getJson('/api/v1/deliverer/orders/available')->assertJsonCount(0, 'data');
 
         // Un autre livreur, lui, la voit et peut la prendre.
@@ -468,16 +466,6 @@ class DeliveryInteractionsTest extends TestCase
         [, , $order] = $this->course(Order::STATUS_ACCEPTEE);
 
         $this->actingAs($this->makeDeliverer()->user, 'sanctum')->postJson("/api/v1/deliverer/orders/{$order->id}/release", ['reason' => 'panne'])->assertForbidden();
-    }
-
-    public function test_the_deliverers_pending_offers_are_withdrawn_when_he_releases(): void
-    {
-        [, $deliverer, $order] = $this->course(Order::STATUS_ACCEPTEE);
-        PriceOffer::create(['order_id' => $order->id, 'deliverer_id' => $deliverer->id, 'amount' => 3500]);
-
-        $this->actingAs($deliverer->user, 'sanctum')->postJson("/api/v1/deliverer/orders/{$order->id}/release", ['reason' => 'panne'])->assertOk();
-
-        $this->assertSame('withdrawn', PriceOffer::first()->status);
     }
 
     // ================================================================ Destinataire injoignable
@@ -556,12 +544,12 @@ class DeliveryInteractionsTest extends TestCase
         $this->actingAs($this->makeUser('client'), 'sanctum')->postJson('/api/v1/client/orders', [
             'type' => 'colis', 'pickup_address' => 'A', 'pickup_lat' => 6.36, 'pickup_lng' => 2.41,
             'dropoff_address' => 'B', 'dropoff_lat' => 6.35, 'dropoff_lng' => 2.36,
-            'recipient_name' => 'Koffi', 'recipient_phone' => '+22901000000', 'price' => 1800,
+            'recipient_name' => 'Koffi', 'recipient_phone' => '+22901000000',
             'photo' => UploadedFile::fake()->image('c.jpg'),
         ])->assertCreated()->assertJsonMissingPath('order.delivery_code');
 
         $order = Order::first();
         $this->assertMatchesRegularExpression('/^\d{4}$/', $order->delivery_code);
-        $this->assertSame('1800.00', $order->initial_price);
+        $this->assertSame($order->price, $order->initial_price); // prix imposé par le serveur
     }
 }

@@ -40,6 +40,8 @@ class DelivererValidationController extends Controller
 
     public function approve(Request $request, Deliverer $deliverer)
     {
+        abort_unless($deliverer->user->hasAvatar(), 422, 'Ce livreur n\'a pas de photo de profil : validez son compte une fois la photo ajoutée.');
+
         $deliverer->update([
             'verification_status' => 'approved',
             'verified_at' => now(),

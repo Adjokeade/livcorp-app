@@ -224,9 +224,8 @@ class DeliveryController extends Controller
                 'reason' => $validated['reason'],
                 'note' => $validated['note'] ?? null,
             ]);
-            $locked->offers()->where('deliverer_id', $deliverer->id)->where('status', 'pending')->update(['status' => 'withdrawn']);
 
-            // Retour à une course libre, au prix que le client avait fixé (pas au prix négocié avec ce livreur).
+            // Retour à une course libre, au prix imposé par LIV corp.
             $locked->forceFill([
                 'deliverer_id' => null,
                 'accepted_at' => null,

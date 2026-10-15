@@ -5,6 +5,8 @@ namespace App\Http\Controllers\Api\Client;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Client\EstimateOrderRequest;
 use App\Http\Requests\Client\StoreOrderRequest;
+use App\Jobs\OpenOrderToAllDeliverers;
+use App\Models\Deliverer;
 use App\Models\Order;
 use App\Services\GeolocationService;
 use App\Notifications\OrderCancelledByClient;
@@ -12,6 +14,8 @@ use App\Services\OrderDispatchService;
 use App\Services\OrderStatusService;
 use App\Services\ParcelPhotoService;
 use Illuminate\Http\Request;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -24,6 +28,11 @@ use Illuminate\Validation\ValidationException;
  */
 class OrderController extends Controller
 {
+    private const MAX_BATCH = 10;
+
+    /** Durée pendant laquelle une course « d'abord aux favoris » leur est réservée. */
+    private const PRIORITY_MINUTES = 10;
+
     public function __construct(
         private readonly GeolocationService $geo,
         private readonly ParcelPhotoService $photos,
@@ -34,11 +43,11 @@ class OrderController extends Controller
     public function index(Request $request)
     {
         return $request->user()
-            ->ordersAsClient()
-            ->with([...Order::DELIVERER_PUBLIC, 'merchant', 'transaction', 'review:id,order_id,rating'])
+            ->visibleOrders()
+            ->whereNull('client_hidden_at')
+            ->with([...Order::DELIVERER_PUBLIC, 'merchant', 'transaction', 'review:id,order_id,rating', 'client:id,first_name,last_name'])
             ->withCount([
-                'offers as pending_offers_count' => fn ($q) => $q->where('status', 'pending'),
-                'messages as unread_messages_count' => fn ($q) => $q->where('sender_id', '!=', $request->user()->id)->whereNull('read_at')->whereColumn('order_messages.deliverer_id', 'orders.deliverer_id'),
+                'messages as unread_messages_count' => fn ($q) => $q->whereIn('sender_id', Deliverer::select('user_id')->whereColumn('deliverers.id', 'orders.deliverer_id'))->whereNull('read_at')->whereColumn('order_messages.deliverer_id', 'orders.deliverer_id'),
             ])
             ->latest()
             ->paginate(15)
@@ -59,11 +68,13 @@ class OrderController extends Controller
             'duration_min' => $route['duration_min'],
             'distance_source' => $route['source'], // 'route' (réelle) ou 'approx' (service d'itinéraires indisponible)
             'route' => $route['geometry'],
+            // Prix imposés par LIV corp selon la distance (tarif négocié de l'entreprise si elle en a un).
             'suggested_prices' => [
-                'standard' => $this->geo->estimatePrice($route['distance_km'], 'standard'),
-                'express' => $this->geo->estimatePrice($route['distance_km'], 'express'),
+                'standard' => $this->geo->priceFor($request->user(), $route['distance_km'], 'standard'),
+                'express' => $this->geo->priceFor($request->user(), $route['distance_km'], 'express'),
             ],
-            'estimated_price' => $this->geo->estimatePrice($route['distance_km'], $validated['urgency'] ?? 'standard'),
+            'estimated_price' => $this->geo->priceFor($request->user(), $route['distance_km'], $validated['urgency'] ?? 'standard'),
+            'negotiated_tariff' => GeolocationService::tariffFor($request->user()) !== GeolocationService::tariff(),
             'min_price' => (int) config('services.orders.min_price'),
         ]);
     }
@@ -74,22 +85,136 @@ class OrderController extends Controller
 
         // La distance est toujours recalculée ici, jamais reprise du client.
         $route = $this->routeFor($validated);
-        $suggested = $this->geo->estimatePrice($route['distance_km'], $validated['urgency'] ?? 'standard');
+        $order = $this->createOrder($request->user(), $validated, $route, $request->file('photo'));
 
-        $photoPath = $request->hasFile('photo') ? $this->photos->store($request->file('photo')) : null;
+        return response()->json(['order' => $order], 201);
+    }
+
+    /**
+     * Envoi en lot (entreprises) : plusieurs destinataires depuis un même point de départ. Chaque
+     * livraison suit les mêmes règles qu'une commande unique (photo, prix, adresses localisées) et le
+     * lot est tout ou rien : une seule ligne invalide, et rien n'est créé.
+     */
+    public function storeBatch(Request $request)
+    {
+        abort_unless($request->user()->account_type === 'entreprise', 403, 'L\'envoi en lot est réservé aux comptes entreprise.');
+
+        $shared = ['pickup_address', 'pickup_lat', 'pickup_lng', 'pickup_details', 'favorites_first'];
+        $rules = ['orders' => 'required|array|min:1|max:'.self::MAX_BATCH];
+        foreach ((new StoreOrderRequest)->rules() as $field => $rule) {
+            if ($field === 'merchant_id') {
+                continue;
+            }
+            $key = in_array($field, $shared, true) ? $field : "orders.*.{$field}";
+            $rules[$key] = is_string($rule) ? str_replace('required_if:type', 'required_if:orders.*.type', $rule) : $rule;
+        }
+        $validated = $request->validate($rules, [
+            'orders.*.photo.required_if' => 'Ajoutez une photo du colis.',
+            'orders.*.photo.max' => 'Cette photo est trop lourde (8 Mo maximum).',
+        ]);
+
+        // Itinéraires d'abord, création ensuite : on signale toutes les lignes en erreur d'un coup.
+        $routes = [];
+        $errors = [];
+        foreach ($validated['orders'] as $i => $row) {
+            try {
+                $routes[$i] = $this->routeFor(Arr::only($validated, $shared) + $row);
+            } catch (ValidationException $e) {
+                foreach ($e->errors() as $field => $messages) {
+                    $errors["orders.{$i}.{$field}"] = $messages;
+                }
+            }
+        }
+        if ($errors) {
+            throw ValidationException::withMessages($errors);
+        }
+
+        $created = DB::transaction(function () use ($request, $validated, $routes, $shared) {
+            return collect($validated['orders'])->map(function ($row, $i) use ($request, $validated, $routes, $shared) {
+                $data = Arr::only($validated, $shared) + Arr::except($row, 'photo');
+
+                return $this->createOrder($request->user(), $data, $routes[$i], $request->file("orders.{$i}.photo"));
+            });
+        });
+
+        return response()->json(['orders' => $created], 201);
+    }
+
+    /** Statistiques d'activité de l'expéditeur : mois en cours, mois précédent, six derniers mois. */
+    public function stats(Request $request)
+    {
+        $start = now()->startOfMonth()->subMonths(5);
+        $orders = $request->user()->visibleOrders()
+            ->where('created_at', '>=', $start)
+            ->get(['id', 'status', 'price', 'created_at']);
+
+        $summary = function ($set) {
+            $delivered = $set->where('status', Order::STATUS_LIVREE);
+            $cancelled = $set->where('status', Order::STATUS_ANNULEE)->count();
+            $closed = $delivered->count() + $cancelled;
+
+            return [
+                'total' => $set->count(),
+                'delivered' => $delivered->count(),
+                'cancelled' => $cancelled,
+                'spent' => (int) $delivered->sum('price'),
+                'success_rate' => $closed > 0 ? round($delivered->count() / $closed * 100) : null,
+            ];
+        };
+
+        $thisMonth = now()->startOfMonth();
+        $inMonth = fn ($month) => $orders->filter(fn ($o) => $o->created_at->isSameMonth($month));
+
+        $history = collect(range(5, 0))->map(function ($ago) use ($thisMonth, $inMonth) {
+            $month = $thisMonth->copy()->subMonths($ago);
+
+            return ['month' => $month->format('Y-m'), 'total' => $inMonth($month)->count()];
+        })->values();
+
+        $open = $request->user()->visibleOrders()
+            ->whereIn('status', [Order::STATUS_CREEE, Order::STATUS_ACCEPTEE, Order::STATUS_COLIS_RECUPERE, Order::STATUS_EN_COURS_LIVRAISON, Order::STATUS_LITIGE])
+            ->count();
+        $toReview = $request->user()->visibleOrders()
+            ->where('status', Order::STATUS_LIVREE)->whereDoesntHave('review')->count();
+
+        return response()->json([
+            'in_progress' => $open,
+            'to_review' => $toReview,
+            'this_month' => $summary($inMonth($thisMonth)),
+            'last_month' => $summary($inMonth($thisMonth->copy()->subMonth())),
+            'history' => $history,
+        ]);
+    }
+
+    /** @param array<string, mixed> $validated @param array<string, mixed> $route */
+    private function createOrder($user, array $validated, array $route, ?UploadedFile $photo): Order
+    {
+        $urgency = $validated['urgency'] ?? 'standard';
+        // Prix imposé : jamais celui reçu du client. `price_suggested` garde le barème standard pour mémoire
+        // (l'écart avec `price` montre une remise négociée).
+        $price = $this->geo->priceFor($user, $route['distance_km'], $urgency);
+        $suggested = $this->geo->estimatePrice($route['distance_km'], $urgency);
+        $photoPath = $photo ? $this->photos->store($photo) : null;
+
+        // « D'abord à mes favoris » : sans effet si l'expéditeur n'a encore aucun livreur favori.
+        $priorityOwner = $user->companyOwnerId();
+        $favoritesFirst = ! empty($validated['favorites_first'])
+            && DB::table('favorite_deliverers')->where('user_id', $priorityOwner)->exists();
 
         // Aucun paiement à la commande : le client règle à la réception du colis, devant le
-        // livreur (cf. PaymentController). Le prix est celui que le client a fixé ; le livreur
-        // peut proposer un autre montant, que le client accepte ou non (cf. OfferController).
+        // livreur (cf. PaymentController), au prix imposé ci-dessus.
         $order = Order::create([
-            ...collect($validated)->except('photo')->all(),
+            ...collect($validated)->except('photo', 'favorites_first')->all(),
+            'priority_until' => $favoritesFirst ? now()->addMinutes(self::PRIORITY_MINUTES) : null,
+            'priority_owner_id' => $favoritesFirst ? $priorityOwner : null,
             'reference' => 'LIV-'.now()->format('Y').'-'.strtoupper(Str::random(6)),
-            'client_id' => $request->user()->id,
+            'client_id' => $user->id,
             'photo_path' => $photoPath,
             'distance_km' => $route['distance_km'],
             'duration_min' => $route['duration_min'],
             'price_suggested' => $suggested,
-            'initial_price' => $validated['price'],
+            'price' => $price,
+            'initial_price' => $price,
             // Code de remise : le destinataire le donne au livreur à la réception, c'est ce qui prouve la livraison.
             'delivery_code' => (string) random_int(1000, 9999),
             'status' => Order::STATUS_CREEE,
@@ -97,9 +222,14 @@ class OrderController extends Controller
         ]);
 
         // Les livreurs disponibles à proximité sont prévenus tout de suite (notification push).
-        $this->dispatch->notifyNearbyDeliverers($order);
+        if ($favoritesFirst) {
+            $this->dispatch->notifyNearbyDeliverers($order, 'favorites');
+            OpenOrderToAllDeliverers::dispatch($order)->delay($order->priority_until);
+        } else {
+            $this->dispatch->notifyNearbyDeliverers($order);
+        }
 
-        return response()->json(['order' => $order], 201);
+        return $order;
     }
 
     public function show(Request $request, Order $order)
@@ -112,11 +242,7 @@ class OrderController extends Controller
             'statusHistory',
             'transaction',
             'review',
-            // Offres en attente : on n'expose du livreur que ce qui aide à choisir (prénom, note, expérience).
-            'offers' => fn ($q) => $q->where('status', 'pending')
-                ->with(['deliverer:id,user_id,average_rating,total_deliveries', 'deliverer.user:id,first_name'])
-                ->latest(),
-        ])->loadCount(['messages as unread_messages_count' => fn ($q) => $q->where('sender_id', '!=', $order->client_id)->whereNull('read_at')->whereColumn('order_messages.deliverer_id', 'orders.deliverer_id')]);
+        ])->loadCount(['messages as unread_messages_count' => fn ($q) => $q->whereIn('sender_id', Deliverer::select('user_id')->whereColumn('deliverers.id', 'orders.deliverer_id'))->whereNull('read_at')->whereColumn('order_messages.deliverer_id', 'orders.deliverer_id')]);
 
         // Le code de remise n'est utile qu'au client, tant que la livraison n'est pas terminée.
         if (! in_array($order->status, [Order::STATUS_LIVREE, Order::STATUS_ANNULEE], true)) {
@@ -150,10 +276,6 @@ class OrderController extends Controller
             }
 
             $assigned = $locked->deliverer?->user;
-            $bidders = $locked->offers()->where('status', 'pending')->with('deliverer.user')->get()
-                ->map(fn ($offer) => $offer->deliverer->user)
-                ->reject(fn ($user) => $assigned && $user->id === $assigned->id);
-            $locked->offers()->where('status', 'pending')->update(['status' => 'declined']);
 
             $this->statusService->transitionTo(
                 $locked,
@@ -161,22 +283,34 @@ class OrderController extends Controller
                 $reason !== '' ? "Annulée par le client : {$reason}" : 'Annulée par le client',
             );
 
-            return ['order' => $locked->fresh([...Order::DELIVERER_PUBLIC, 'statusHistory'])->maskContacts(), 'assigned' => $assigned, 'bidders' => $bidders];
+            return ['order' => $locked->fresh([...Order::DELIVERER_PUBLIC, 'statusHistory'])->maskContacts(), 'assigned' => $assigned];
         });
 
         if (isset($outcome['error'])) {
             return response()->json(['message' => $outcome['error']], 422);
         }
 
-        // Après validation de l'annulation : le livreur (ou ceux qui avaient fait une proposition) est prévenu.
+        // Après validation de l'annulation : le livreur assigné, s'il y en avait un, est prévenu.
         if ($outcome['assigned']) {
             rescue(fn () => $outcome['assigned']->notify(new OrderCancelledByClient($outcome['order'], wasAssigned: true)));
         }
-        foreach ($outcome['bidders'] as $bidder) {
-            rescue(fn () => $bidder->notify(new OrderCancelledByClient($outcome['order'], wasAssigned: false)));
-        }
 
         return response()->json(['order' => $outcome['order']]);
+    }
+
+    /**
+     * « Retirer » une demande annulée de sa liste. Une demande encore active doit d'abord être annulée :
+     * on ne fait pas disparaître une livraison en cours de la vue de l'expéditeur.
+     */
+    public function hide(Request $request, Order $order)
+    {
+        $this->authorize('view', $order);
+
+        abort_if($order->status !== Order::STATUS_ANNULEE, 422, 'Annulez d\'abord cette demande pour pouvoir la retirer de votre liste.');
+
+        $order->forceFill(['client_hidden_at' => now()])->save();
+
+        return response()->noContent();
     }
 
     /**

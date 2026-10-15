@@ -4,7 +4,8 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite",
+        "dev": "concurrently -k -n api,queue,web -c blue,yellow,green \"php artisan serve --host=127.0.0.1 --port=8000\" \"php artisan queue:work --tries=1\" \"vite\"",
+        "dev:web": "vite",
         "preview": "vite preview"
     },
     "devDependencies": {

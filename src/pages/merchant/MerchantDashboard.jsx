@@ -50,7 +50,7 @@ export default function MerchantDashboard() {
   }
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+    <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
       <div>
         <h1 className="font-display text-2xl font-bold">Tableau de bord : {shop.shop_name || 'Ma boutique'}</h1>
 

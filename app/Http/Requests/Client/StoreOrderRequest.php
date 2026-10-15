@@ -13,9 +13,6 @@ class StoreOrderRequest extends FormRequest
 
     public function rules(): array
     {
-        $min = (int) config('services.orders.min_price');
-        $max = (int) config('services.orders.max_price');
-
         return [
             'type' => 'required|in:colis,course',
             'merchant_id' => 'nullable|exists:merchants,id',
@@ -32,8 +29,9 @@ class StoreOrderRequest extends FormRequest
             'package_type' => 'nullable|string|max:100',
             'instructions' => 'nullable|string|max:500',
             'urgency' => 'nullable|in:standard,express',
-            // Le client fixe son prix (le prix conseillé n'est qu'un repère) ; le livreur peut le contester.
-            'price' => "required|integer|between:{$min},{$max}",
+            // Proposer la livraison d'abord aux livreurs favoris (réservée à eux pendant quelques minutes).
+            'favorites_first' => 'nullable|boolean',
+            // Pas de prix ici : il est imposé par LIV corp selon la distance (cf. GeolocationService::priceFor).
             // Un colis se montre : la photo est obligatoire. Pour une course (achats à faire), elle est facultative.
             'photo' => 'required_if:type,colis|nullable|image|mimes:jpg,jpeg,png,webp|max:8192',
         ];
@@ -50,8 +48,6 @@ class StoreOrderRequest extends FormRequest
             'dropoff_lng.between' => $outside,
             'photo.required_if' => 'Ajoutez une photo du colis : le livreur doit voir ce qu\'il transporte.',
             'photo.max' => 'Cette photo est trop lourde (8 Mo maximum).',
-            'price.between' => 'Le prix doit être compris entre :min et :max FCFA.',
-            'price.integer' => 'Le prix doit être un montant entier en FCFA.',
         ];
     }
 }

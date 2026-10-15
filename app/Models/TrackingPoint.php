@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class TrackingPoint extends Model
 {
     public $timestamps = false;
-    protected $fillable = ['order_id', 'deliverer_id', 'lat', 'lng', 'recorded_at'];
+    protected $fillable = ['order_id', 'deliverer_id', 'lat', 'lng', 'accuracy_m', 'recorded_at'];
 
     protected function casts(): array
     {

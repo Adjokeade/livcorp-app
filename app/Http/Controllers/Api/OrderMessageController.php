@@ -21,6 +21,8 @@ class OrderMessageController extends Controller
 
         $user = $request->user();
         $conversation = $order->messages()->where('deliverer_id', $order->deliverer_id);
+        // Côté expéditeur, plusieurs comptes de l'équipe peuvent écrire : "les miens" = tout ce qui ne vient pas du livreur.
+        $delivererUserId = $order->deliverer?->user_id;
 
         $messages = (clone $conversation)
             ->when($request->integer('after'), fn ($q, $after) => $q->where('id', '>', $after))
@@ -30,13 +32,16 @@ class OrderMessageController extends Controller
 
         // La conversation est "ouverte" à l'écran : ce que l'autre a écrit est alors lu.
         if ($request->boolean('open')) {
-            (clone $conversation)->where('sender_id', '!=', $user->id)->whereNull('read_at')->update(['read_at' => now()]);
+            (clone $conversation)->when($user->isLivreur(),
+                fn ($q) => $q->where('sender_id', '!=', $user->id),
+                fn ($q) => $q->where('sender_id', $delivererUserId))
+                ->whereNull('read_at')->update(['read_at' => now()]);
         }
 
         return response()->json([
             'data' => $messages->map(fn (OrderMessage $m) => [
                 'id' => $m->id,
-                'mine' => $m->sender_id === $user->id,
+                'mine' => $user->isLivreur() ? $m->sender_id === $user->id : $m->sender_id !== $delivererUserId,
                 'body' => $m->body,
                 'created_at' => $m->created_at,
             ]),
@@ -64,7 +69,7 @@ class OrderMessageController extends Controller
         ]);
 
         // L'autre partie est prévenue (notification), comme pour un SMS.
-        $toClient = $user->id !== $order->client_id;
+        $toClient = $user->isLivreur();
         $recipient = $toClient ? $order->client : $order->deliverer->user;
         $url = config('app.frontend_url').($toClient
             ? "/client/suivi/{$order->id}?chat=1"
