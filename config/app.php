@@ -68,12 +68,14 @@ return [
     'frontend_url' => env('FRONTEND_URL', env('APP_URL', 'http://localhost')),
 
     /*
-    | Vérification de l'adresse e-mail obligatoire avant de commander ou de
-    | livrer. À laisser à true en production (avec un vrai SMTP). En local,
-    | sans serveur d'envoi, mettre EMAIL_VERIFICATION_REQUIRED=false : les
-    | comptes sont alors marqués vérifiés dès l'inscription.
+    | Vérification de l'adresse e-mail avant de commander ou de livrer.
+    | DÉSACTIVÉE pour le moment : les comptes sont marqués vérifiés dès l'inscription.
+    | À passer à true (EMAIL_VERIFICATION_ENABLED=true) quand l'envoi d'e-mails sera
+    | actif. Le nom de la variable a changé exprès : une ancienne ligne
+    | EMAIL_VERIFICATION_REQUIRED=true, restée dans un .env copié d'un vieux
+    | .env.example, n'a plus aucun effet.
     */
-    'email_verification_required' => (bool) env('EMAIL_VERIFICATION_REQUIRED', false),
+    'email_verification_required' => (bool) env('EMAIL_VERIFICATION_ENABLED', false),
 
     /*
     |--------------------------------------------------------------------------

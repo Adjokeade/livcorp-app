@@ -60,7 +60,7 @@ php artisan mail:status               # silencieux ou actif, identifiants comple
 php artisan mail:test vous@exemple.com
 ```
 
-Les e-mails passent par la file d'attente : `queue:work` doit tourner. La vérification d'adresse e-mail est **désactivée pour le moment** (`EMAIL_VERIFICATION_REQUIRED=false`, comptes validés d'office) ; penser à passer `EMAIL_VERIFICATION_REQUIRED=true` une fois l'envoi actif.
+Les e-mails passent par la file d'attente : `queue:work` doit tourner. La vérification d'adresse e-mail est **désactivée pour le moment** (`EMAIL_VERIFICATION_ENABLED=false`, comptes validés d'office) ; penser à passer `EMAIL_VERIFICATION_ENABLED=true` une fois l'envoi actif.
 
 ### Paiement d'avance et confirmation de réception
 

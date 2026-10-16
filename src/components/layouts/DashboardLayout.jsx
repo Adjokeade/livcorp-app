@@ -11,7 +11,7 @@ import OfflineBanner from '../pwa/OfflineBanner';
 // Rappel affiché tant que l'adresse e-mail n'est pas vérifiée : sans elle,
 // le serveur refuse de créer des commandes (middleware verified.email).
 // N'apparaît jamais si le serveur marque les comptes vérifiés d'office
-// (EMAIL_VERIFICATION_REQUIRED=false).
+// (EMAIL_VERIFICATION_ENABLED=false).
 function VerifyEmailBanner({ user }) {
   const { resendVerification } = useAuthStore();
   const [state, setState] = useState('idle'); // idle | sending | sent | failed
