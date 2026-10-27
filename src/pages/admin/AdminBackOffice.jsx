@@ -144,7 +144,7 @@ export function DelivererValidation() {
                     onClick={() => openDocument(doc)}
                     className="font-semibold text-secondary underline"
                   >
-                    {doc.type === 'piece_identite' ? "Voir la pièce d'identité" : doc.type === 'permis_conduire' ? 'Voir le permis' : 'Voir le document'}
+                    {{ piece_identite: "Voir la pièce d'identité", permis_conduire: 'Voir le permis', certificat_residence: 'Voir le certificat de résidence' }[doc.type] ?? 'Voir le document'}
                   </button>
                 ))}
               </div>

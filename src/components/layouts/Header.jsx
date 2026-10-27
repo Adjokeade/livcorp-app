@@ -18,6 +18,8 @@ function Logo() {
 const NAV_LINKS = [
   { to: '/', label: 'Accueil' },
   { to: '/annonces', label: 'Annonces' },
+  { to: '/conciergerie', label: 'Conciergerie' },
+  { to: '/prestataires', label: 'Prestataires' },
   { to: '/contact', label: 'Contactez-nous' },
   { to: '/a-propos', label: 'À propos' },
 ];
@@ -38,7 +40,7 @@ export default function Header() {
       <div className="mx-auto flex max-w-[1200px] items-center justify-between gap-2 px-4 py-3 sm:px-10">
         <Logo />
 
-        <nav className="hidden items-center gap-6 text-sm font-medium text-on-surface-variant sm:flex">
+        <nav className="hidden items-center gap-6 text-sm font-medium text-on-surface-variant lg:flex">
           {NAV_LINKS.map((link) => (
             <Link key={link.to} to={link.to}>
               {link.label}
@@ -46,25 +48,25 @@ export default function Header() {
           ))}
         </nav>
 
-        <div className="flex items-center gap-2 sm:gap-3">
+        <div className="flex items-center gap-2 lg:gap-3">
           {user ? (
             <>
               <Link
                 to={ROLE_HOME[user.role] ?? '/'}
-                className="hidden text-sm font-semibold text-on-surface sm:inline"
+                className="hidden text-sm font-semibold text-on-surface lg:inline"
               >
                 Bonjour, {user.first_name}
               </Link>
-              <Button variant="secondary" onClick={handleLogout} className="hidden sm:inline-flex">
+              <Button variant="secondary" onClick={handleLogout} className="hidden lg:inline-flex">
                 Déconnexion
               </Button>
             </>
           ) : (
             <>
-              <Link to="/connexion" className="btn-tertiary hidden sm:inline-flex">
+              <Link to="/connexion" className="btn-tertiary hidden lg:inline-flex">
                 Connexion
               </Link>
-              <Link to="/inscription" className="btn-primary hidden sm:inline-flex">
+              <Link to="/inscription" className="btn-primary hidden lg:inline-flex">
                 Inscription
               </Link>
             </>
@@ -77,7 +79,7 @@ export default function Header() {
             onClick={() => setMenuOpen((open) => !open)}
             aria-label={menuOpen ? 'Fermer le menu' : 'Ouvrir le menu'}
             aria-expanded={menuOpen}
-            className="flex h-10 w-10 items-center justify-center rounded-lg border border-outline-variant text-on-surface sm:hidden"
+            className="flex h-10 w-10 items-center justify-center rounded-lg border border-outline-variant text-on-surface lg:hidden"
           >
             {menuOpen ? (
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5">
@@ -93,7 +95,7 @@ export default function Header() {
       </div>
 
       {menuOpen && (
-        <nav className="border-t border-outline-variant bg-surface px-4 py-4 sm:hidden">
+        <nav className="border-t border-outline-variant bg-surface px-4 py-4 lg:hidden">
           <ul className="flex flex-col gap-1 text-sm font-medium text-on-surface-variant">
             {NAV_LINKS.map((link) => (
               <li key={link.to}>

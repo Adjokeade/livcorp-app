@@ -42,6 +42,11 @@ const adminService = {
   documentBlob: (documentId) =>
     api.get(`/admin/documents/${documentId}`, { responseType: 'blob' }).then((r) => r.data),
 
+  // Candidatures des prestataires de services (plombiers, coiffeuses, informaticiens…).
+  serviceProviders: (params = {}) => api.get('/admin/service-providers', { params }).then((r) => r.data),
+  approveServiceProvider: (id) => api.post(`/admin/service-providers/${id}/approve`).then((r) => r.data),
+  rejectServiceProvider: (id, reason) => api.post(`/admin/service-providers/${id}/reject`, { reason }).then((r) => r.data),
+
   // Messages du formulaire Contactez-nous ; la réponse porte aussi `new_count` (non lus).
   messages: ({ status, page = 1 } = {}) =>
     api.get('/admin/messages', { params: { page, ...(status ? { status } : {}) } }).then((r) => r.data),

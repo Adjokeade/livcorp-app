@@ -40,7 +40,7 @@ export default function Sidebar() {
   const rest = crowded ? items.filter((i) => !bar.includes(i)) : [];
   const restActive = rest.some((i) => pathname.startsWith(i.to));
 
-  const name = user.company_name && user.account_type === 'entreprise' ? user.company_name : `${user.first_name} ${user.last_name}`;
+  const name = user.company_name && ['entreprise', 'conciergerie'].includes(user.account_type) ? user.company_name : `${user.first_name} ${user.last_name}`;
 
   return (
     <>

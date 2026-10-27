@@ -19,7 +19,7 @@ class ProfileController extends Controller
     public function update(Request $request)
     {
         $user = $request->user();
-        $isEntreprise = $user->role === 'client' && $user->account_type === 'entreprise';
+        $isEntreprise = $user->role === 'client' && in_array($user->account_type, ['entreprise', 'conciergerie'], true);
 
         $validated = $request->validate([
             'first_name' => 'required|string|max:100',

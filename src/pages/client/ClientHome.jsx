@@ -81,7 +81,7 @@ export default function ClientHome() {
 
   const active = orders.filter((o) => ACTIVE.includes(o.status));
   const isEntreprise = user.account_type === 'entreprise';
-  const greeting = user.account_type === 'entreprise' && user.company_name ? user.company_name : user.first_name;
+  const greeting = ['entreprise', 'conciergerie'].includes(user.account_type) && user.company_name ? user.company_name : user.first_name;
 
   return (
     <div className="flex flex-col gap-6">

@@ -61,4 +61,4 @@ export async function openDocument(doc) {
   }
 }
 
-export const DOC_LABEL = { piece_identite: "Pièce d'identité", permis_conduire: 'Permis de conduire', photo_profil: 'Photo de profil', rccm: 'RCCM', ifu: 'IFU' };
+export const DOC_LABEL = { piece_identite: "Pièce d'identité", permis_conduire: 'Permis de conduire', certificat_residence: 'Certificat de résidence', photo_profil: 'Photo de profil', rccm: 'RCCM', ifu: 'IFU' };

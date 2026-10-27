@@ -22,6 +22,7 @@ class DocumentController extends Controller
     private const TYPES = [
         'id_card' => 'piece_identite',
         'driving_license' => 'permis_conduire',
+        'residence_certificate' => 'certificat_residence',
     ];
 
     public function store(Request $request)
@@ -29,13 +30,14 @@ class DocumentController extends Controller
         $validated = $request->validate([
             'id_card' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
             'driving_license' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
+            'residence_certificate' => 'nullable|file|mimes:jpg,jpeg,png,pdf|max:5120',
             'vehicle_type' => 'nullable|in:moto,velo,voiture,a_pied',
             'vehicle_plate' => 'nullable|string|max:20',
         ]);
 
         $user = $request->user();
 
-        if (! $request->hasFile('id_card') && ! $request->hasFile('driving_license')) {
+        if (! collect(array_keys(self::TYPES))->contains(fn ($field) => $request->hasFile($field))) {
             return response()->json([
                 'message' => 'Ajoutez au moins un document.',
                 'errors' => ['id_card' => ['Ajoutez au moins un document.']],

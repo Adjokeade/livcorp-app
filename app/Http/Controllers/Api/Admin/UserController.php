@@ -17,7 +17,7 @@ class UserController extends Controller
         $filters = $request->validate([
             'q' => 'nullable|string|max:100',
             'role' => 'nullable|in:client,commercant,livreur',
-            'account_type' => 'nullable|in:particulier,entreprise',
+            'account_type' => 'nullable|in:particulier,entreprise,conciergerie',
             'status' => 'nullable|in:active,inactive',
         ]);
 

@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\Admin\DisputeController;
 use App\Http\Controllers\Api\Admin\DelivererController as AdminDelivererController;
 use App\Http\Controllers\Api\Admin\FinanceController;
 use App\Http\Controllers\Api\Admin\OrderController as AdminOrderController;
+use App\Http\Controllers\Api\Admin\ServiceProviderController as AdminServiceProviderController;
 use App\Http\Controllers\Api\Admin\TariffController;
 use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\Auth\AuthController;
@@ -32,6 +33,7 @@ use App\Http\Controllers\Api\Deliverer\WalletController;
 use App\Http\Controllers\Api\MarketplaceController;
 use App\Http\Controllers\Api\OrderMessageController;
 use App\Http\Controllers\Api\ProfileController;
+use App\Http\Controllers\Api\ServiceProviderController;
 use App\Http\Controllers\Api\SavedAddressController;
 use App\Http\Controllers\Api\OrderPhotoController;
 use App\Http\Controllers\Api\PushSubscriptionController;
@@ -74,6 +76,10 @@ Route::prefix('v1')->group(function () {
 
     // --- Formulaire "Contactez-nous" (public) ---
     Route::post('/contact', [ContactMessageController::class, 'store'])->middleware('throttle:5,1');
+
+    // --- Inscription des prestataires de services (plombiers, coiffeuses, informaticiens…) : public ---
+    Route::get('/service-providers/professions', [ServiceProviderController::class, 'professions']);
+    Route::post('/service-providers', [ServiceProviderController::class, 'store'])->middleware('throttle:5,1');
 
     // ===== MARCHÉ =====
     // Pouls de la plateforme, public (pas besoin d'un compte pour voir que ça
@@ -211,6 +217,10 @@ Route::prefix('v1')->group(function () {
             Route::put('/finance/settings', [FinanceController::class, 'updateSettings']);
             Route::get('/tariff', [TariffController::class, 'show']);
             Route::put('/tariff', [TariffController::class, 'update']);
+
+            Route::get('/service-providers', [AdminServiceProviderController::class, 'index']);
+            Route::post('/service-providers/{serviceProvider}/approve', [AdminServiceProviderController::class, 'approve']);
+            Route::post('/service-providers/{serviceProvider}/reject', [AdminServiceProviderController::class, 'reject']);
 
             Route::get('/messages', [AdminContactMessageController::class, 'index']);
             Route::patch('/messages/{contactMessage}/status', [AdminContactMessageController::class, 'updateStatus']);

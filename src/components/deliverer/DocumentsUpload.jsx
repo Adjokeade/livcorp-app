@@ -9,7 +9,9 @@ import useAuthStore from '../../store/useAuthStore';
 // de bord tant que le dossier n'est pas complet.
 export default function DocumentsUpload({ onDone, submitLabel = 'Envoyer mon dossier' }) {
   const user = useAuthStore((s) => s.user);
-  const [files, setFiles] = useState({ id_card: null, driving_license: null });
+  const [files, setFiles] = useState({ id_card: null, driving_license: null, residence_certificate: null });
+  // Un certificat déjà déposé n'est pas redemandé lors d'un renvoi de dossier.
+  const hasCertificate = (user?.documents ?? []).some((d) => d.type === 'certificat_residence');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
@@ -25,13 +27,20 @@ export default function DocumentsUpload({ onDone, submitLabel = 'Envoyer mon dos
     }
 
     if (!files.id_card && !files.driving_license) {
-      setError('Ajoutez au moins un document avant d\'envoyer.');
+      setError('Ajoutez au moins une pièce d\'identité ou un permis avant d\'envoyer.');
+      return;
+    }
+
+    if (!files.residence_certificate && !hasCertificate) {
+      setFieldErrors({ residence_certificate: ['Le certificat de résidence est obligatoire.'] });
+      setError('Ajoutez votre certificat de résidence avant d\'envoyer.');
       return;
     }
 
     const formData = new FormData();
     if (files.id_card) formData.append('id_card', files.id_card);
     if (files.driving_license) formData.append('driving_license', files.driving_license);
+    if (files.residence_certificate) formData.append('residence_certificate', files.residence_certificate);
 
     setSending(true);
     try {
@@ -72,6 +81,14 @@ export default function DocumentsUpload({ onDone, submitLabel = 'Envoyer mon dos
         error={fieldErrors.driving_license?.[0]}
         onChange={(f) => setFiles((s) => ({ ...s, driving_license: f }))}
       />
+      <FileField
+        label="Certificat de résidence"
+        required={!hasCertificate}
+        hint={hasCertificate ? 'Déjà reçu : ajoutez un fichier seulement pour le remplacer.' : 'Délivré par votre mairie ou votre chef de quartier.'}
+        file={files.residence_certificate}
+        error={fieldErrors.residence_certificate?.[0]}
+        onChange={(f) => setFiles((s) => ({ ...s, residence_certificate: f }))}
+      />
       <p className="text-xs text-on-surface-variant">Formats acceptés : JPG, PNG ou PDF, 5 Mo maximum par fichier.</p>
       <Button type="submit" disabled={sending} className="w-full">
         {sending ? 'Envoi…' : submitLabel}
@@ -80,10 +97,13 @@ export default function DocumentsUpload({ onDone, submitLabel = 'Envoyer mon dos
   );
 }
 
-function FileField({ label, file, error, onChange }) {
+function FileField({ label, file, error, onChange, required = false, hint }) {
   return (
     <div>
-      <span className="mb-1.5 block text-sm font-semibold">{label}</span>
+      <span className="mb-1.5 block text-sm font-semibold">
+        {label}
+        {required && <span className="text-error"> *</span>}
+      </span>
       <input
         type="file"
         accept="image/jpeg,image/png,application/pdf"
@@ -91,6 +111,7 @@ function FileField({ label, file, error, onChange }) {
         className="block w-full rounded border border-dashed border-outline-variant bg-surface-container-lowest px-3 py-3 text-sm file:mr-3 file:rounded file:border-0 file:bg-primary-fixed file:px-3 file:py-1.5 file:text-sm file:font-semibold file:text-on-primary-fixed-variant"
         aria-label={label}
       />
+      {hint && <p className="mt-1 text-xs text-on-surface-variant">{hint}</p>}
       {file && <p className="mt-1 truncate text-xs text-on-surface-variant">{file.name}</p>}
       {error && <p className="mt-1 text-xs font-medium text-error">{error}</p>}
     </div>

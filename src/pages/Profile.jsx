@@ -25,7 +25,7 @@ function InfoCard({ user }) {
   });
   const [state, setState] = useState({ busy: false, saved: false, fields: {}, message: '' });
   const setUser = useAuthStore((s) => s.setUser);
-  const isEntreprise = user.role === 'client' && user.account_type === 'entreprise';
+  const isEntreprise = user.role === 'client' && ['entreprise', 'conciergerie'].includes(user.account_type);
   const set = (key) => (e) => setForm({ ...form, [key]: e.target.value });
 
   async function submit(e) {
@@ -46,7 +46,7 @@ function InfoCard({ user }) {
       <h2 className="font-display text-lg font-bold">Informations personnelles</h2>
       <form className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={submit}>
         {isEntreprise && (
-          <Input className="sm:col-span-2" label="Nom de l'entreprise" required value={form.company_name} onChange={set('company_name')} error={fields.company_name} />
+          <Input className="sm:col-span-2" label={user.account_type === 'conciergerie' ? 'Nom de la conciergerie' : "Nom de l'entreprise"} required value={form.company_name} onChange={set('company_name')} error={fields.company_name} />
         )}
         <Input label="Prénom" name="first_name" required value={form.first_name} onChange={set('first_name')} error={fields.first_name} />
         <Input label="Nom" name="last_name" required value={form.last_name} onChange={set('last_name')} error={fields.last_name} />

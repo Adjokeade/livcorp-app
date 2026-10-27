@@ -9,6 +9,7 @@ import HowItWorks from '../components/home/HowItWorks';
 import deliveryHandoffPhoto from '../assets/images/delivery-handoff.jpg';
 import profileParticulierPhoto from '../assets/images/profile-particulier.jpg';
 import profileEntreprisePhoto from '../assets/images/profile-entreprise.jpg';
+import profileConciergeriePhoto from '../assets/images/profile-conciergerie.jpg';
 import profileLivreurPhoto from '../assets/images/profile-livreur.jpg';
 import serviceColisPhoto from '../assets/images/service-colis.jpg';
 import serviceCoursiersPhoto from '../assets/images/service-coursiers.jpg';
@@ -26,9 +27,11 @@ export default function Home() {
     <>
       <Hero />
       <Services />
+      <ConciergerieBand />
       <MarketTeaser />
       <HowItWorks />
       <Profiles />
+      <ProviderTeaser />
       <FinalCta />
     </>
   );
@@ -92,6 +95,10 @@ function Hero() {
             Vous êtes livreur ?{' '}
             <Link to="/inscription/livreur" className="btn-tertiary">
               Rejoignez la flotte →
+            </Link>
+            {' '}Conciergerie ?{' '}
+            <Link to="/conciergerie" className="btn-tertiary">
+              Découvrir →
             </Link>
           </p>
 
@@ -240,6 +247,42 @@ function ServiceGroup({ badge, badgeClass, accent, items, className = '' }) {
   );
 }
 
+// Mise en avant de l'offre conciergerie : photo (cloche de réception et concierge) et accès direct.
+function ConciergerieBand() {
+  return (
+    <section className="mx-auto max-w-[1200px] px-4 pt-16 sm:px-10">
+      <Reveal>
+        <div className="grid overflow-hidden rounded-2xl border border-outline-variant bg-surface-container-lowest shadow-card md:grid-cols-2">
+          <img
+            src={profileConciergeriePhoto}
+            alt="Une cloche de réception sur un comptoir et un concierge au téléphone"
+            width="800"
+            height="500"
+            loading="lazy"
+            decoding="async"
+            className="aspect-[16/10] h-full w-full object-cover"
+          />
+          <div className="flex flex-col justify-center p-6 sm:p-10">
+            <span className="self-start rounded-lg bg-secondary px-3 py-1 text-xs font-semibold text-on-secondary">Conciergerie</span>
+            <h2 className="mt-3 font-display text-2xl font-bold sm:text-3xl">Votre conciergerie, vos coursiers vérifiés</h2>
+            <p className="mt-3 text-on-surface-variant">
+              Courses, colis, démarches du quotidien : confiez-les à des professionnels dédiés, avec une flexibilité horaire et un suivi en direct.
+            </p>
+            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+              <Link to="/inscription?account_type=conciergerie" className="btn-primary">
+                Créer un compte conciergerie
+              </Link>
+              <Link to="/conciergerie" className="btn-secondary">
+                En savoir plus
+              </Link>
+            </div>
+          </div>
+        </div>
+      </Reveal>
+    </section>
+  );
+}
+
 // Bandeau de renvoi vers /annonces (public) : preuve sociale, montre que la
 // plateforme est active, sans exiger de compte pour la découvrir.
 function MarketTeaser() {
@@ -268,6 +311,33 @@ function MarketTeaser() {
   );
 }
 
+// Bandeau d'appel aux prestataires de services (plombiers, coiffeuses, informaticiens…).
+function ProviderTeaser() {
+  return (
+    <section className="mx-auto max-w-[1200px] px-4 pt-16 sm:px-10">
+      <Reveal>
+        <Link
+          to="/prestataires"
+          className="card-hover group flex flex-col items-start justify-between gap-4 rounded-2xl border border-outline-variant bg-surface-container-lowest px-6 py-6 shadow-card sm:flex-row sm:items-center sm:px-8"
+        >
+          <div>
+            <p className="font-display text-lg font-bold">Plombier, coiffeuse, informaticien… proposez vos services</p>
+            <p className="mt-1 text-sm text-on-surface-variant">
+              Inscrivez-vous comme prestataire : votre profil est examiné et validé par notre équipe.
+            </p>
+          </div>
+          <span className="btn-tertiary flex-shrink-0 group-hover:[background-size:100%_1.5px]">
+            Devenir prestataire{' '}
+            <span aria-hidden="true" className="inline-block transition-transform duration-200 group-hover:translate-x-1">
+              →
+            </span>
+          </span>
+        </Link>
+      </Reveal>
+    </section>
+  );
+}
+
 function Profiles() {
   return (
     <section className="bg-surface-container py-16">
@@ -282,7 +352,7 @@ function Profiles() {
           </p>
         </Reveal>
 
-        <div className="mt-10 grid grid-cols-1 gap-6 text-left sm:grid-cols-3">
+        <div className="mt-10 grid grid-cols-1 gap-6 text-left sm:grid-cols-2 lg:grid-cols-4">
           <ProfileCard
             delay={0}
             image={profileParticulierPhoto}
@@ -305,6 +375,16 @@ function Profiles() {
           />
           <ProfileCard
             delay={300}
+            image={profileConciergeriePhoto}
+            imageAlt="Une cloche de réception sur un comptoir et un concierge au téléphone"
+            title="Conciergerie"
+            description="Confiez courses, colis et démarches à des coursiers vérifiés, avec une flexibilité horaire."
+            points={['Courses et achats pour vos clients', 'Service VIP discret et sécurisé', 'Compte dédié à votre structure']}
+            cta="Découvrir la conciergerie"
+            to="/conciergerie"
+          />
+          <ProfileCard
+            delay={450}
             image={profileLivreurPhoto}
             imageAlt="Un livreur souriant, casque et sacoche de livraison, prêt à partir"
             title="Livreur"

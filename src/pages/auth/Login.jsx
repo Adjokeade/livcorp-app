@@ -6,12 +6,13 @@ import Input from '../../components/common/Input';
 import Button from '../../components/common/Button';
 import { homeAfterLogin } from '../../lib/roleHome';
 
-// Mêmes trois profils qu'à l'inscription. La catégorie choisie est envoyée
+// Mêmes profils qu'à l'inscription. La catégorie choisie est envoyée
 // au serveur, qui refuse la connexion si elle ne correspond pas au compte.
 // Elle oriente aussi vers la bonne inscription.
 const PROFILES = [
   { value: 'particulier', label: 'Particulier', registerTo: '/inscription?account_type=particulier' },
   { value: 'entreprise', label: 'Entreprise', registerTo: '/inscription?account_type=entreprise' },
+  { value: 'conciergerie', label: 'Conciergerie', registerTo: '/inscription?account_type=conciergerie' },
   { value: 'livreur', label: 'Livreur', registerTo: '/inscription/livreur' },
 ];
 
@@ -54,7 +55,7 @@ export default function Login() {
 
         <div className="mt-6">
           <span className="mb-1.5 block text-sm font-semibold">Je suis…</span>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-2 gap-2">
             {PROFILES.map((opt) => (
               <button
                 type="button"

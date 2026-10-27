@@ -3,7 +3,7 @@ import Card from '../common/Card';
 import Button from '../common/Button';
 import DocumentsUpload from './DocumentsUpload';
 
-const DOC_LABELS = { piece_identite: "Pièce d'identité", permis_conduire: 'Permis de conduire' };
+const DOC_LABELS = { piece_identite: "Pièce d'identité", permis_conduire: 'Permis de conduire', certificat_residence: 'Certificat de résidence' };
 const DOC_STATUS = { pending: "En cours d'examen", approved: 'Validé', rejected: 'Refusé' };
 
 // Affiché à la place du tableau de bord tant que l'administrateur n'a pas validé
@@ -45,7 +45,7 @@ export default function PendingValidation({ user, onRefresh }) {
           </p>
         ) : (
           <p className="mt-2 text-sm text-on-surface-variant">
-            Déposez votre pièce d'identité et votre permis pour que notre équipe valide votre compte livreur.
+            Déposez votre pièce d'identité, votre permis et votre certificat de résidence pour que notre équipe valide votre compte livreur.
           </p>
         )}
 

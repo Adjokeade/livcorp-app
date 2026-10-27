@@ -39,7 +39,7 @@ export function menuFor(user) {
 
 // Libellé de la catégorie du compte, affiché sous le nom dans le menu et sur le profil.
 export function categoryLabel(user) {
-  if (user?.role === 'client') return user.account_type === 'entreprise' ? 'Entreprise' : 'Particulier';
+  if (user?.role === 'client') return { entreprise: 'Entreprise', conciergerie: 'Conciergerie' }[user.account_type] ?? 'Particulier';
   if (user?.role === 'livreur') return 'Livreur';
   if (user?.role === 'commercant') return 'Commerçant';
   return '';

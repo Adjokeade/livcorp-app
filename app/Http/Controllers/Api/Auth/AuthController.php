@@ -23,7 +23,8 @@ class AuthController extends Controller
 
     public function register(Request $request)
     {
-        $isEntreprise = $request->input('role') === 'client' && $request->input('account_type') === 'entreprise';
+        // Entreprise et conciergerie sont des structures : elles ont un nom commercial et pas de sexe.
+        $isEntreprise = $request->input('role') === 'client' && in_array($request->input('account_type'), ['entreprise', 'conciergerie'], true);
         $isParticulier = $request->input('role') === 'client' && $request->input('account_type') === 'particulier';
 
         $validated = $request->validate([
@@ -31,7 +32,7 @@ class AuthController extends Controller
             // L'expéditeur (role "client") se déclare entreprise ou particulier
             // dès l'inscription — cf. cahier des charges "Parcours de
             // l'expéditeur", étape 1. Sans objet pour commerçant/livreur.
-            'account_type' => [Rule::requiredIf($request->input('role') === 'client'), 'nullable', 'in:entreprise,particulier'],
+            'account_type' => [Rule::requiredIf($request->input('role') === 'client'), 'nullable', 'in:entreprise,particulier,conciergerie'],
             'company_name' => [Rule::requiredIf($isEntreprise), 'nullable', 'string', 'max:150'],
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
@@ -46,8 +47,8 @@ class AuthController extends Controller
             'vehicle_plate' => 'nullable|string|max:20',
         ]);
 
-        // "address" est aussi requise pour un expéditeur (entreprise ou
-        // particulier), mais required_if ne gère qu'une seule valeur : on le
+        // "address" est aussi requise pour un expéditeur (entreprise,
+        // conciergerie ou particulier), mais required_if ne gère qu'une seule valeur : on le
         // vérifie ici plutôt que d'alourdir la règle ci-dessus.
         if ($request->input('role') === 'client' && ! $request->filled('address')) {
             throw ValidationException::withMessages(['address' => 'Le champ adresse est obligatoire.']);
@@ -154,7 +155,7 @@ class AuthController extends Controller
             'password' => 'required|string',
             // Catégorie choisie sur l'écran de connexion (optionnelle : l'auto-connexion
             // après inscription et les anciens clients ne l'envoient pas).
-            'category' => 'nullable|in:particulier,entreprise,livreur,commercant',
+            'category' => 'nullable|in:particulier,entreprise,conciergerie,livreur,commercant',
         ]);
         $category = $credentials['category'] ?? null;
         unset($credentials['category']);
@@ -236,6 +237,7 @@ class AuthController extends Controller
         return match ($category) {
             'particulier' => 'particulier',
             'entreprise' => 'entreprise',
+            'conciergerie' => 'conciergerie',
             'livreur' => 'livreur',
             'commercant' => 'commerçant',
         };

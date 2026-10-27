@@ -7,7 +7,9 @@ const FOOTER_COLUMNS = [
     links: [
       { label: 'Devenir particulier', to: '/inscription?account_type=particulier' },
       { label: 'Devenir entreprise', to: '/inscription?account_type=entreprise' },
+      { label: 'Devenir conciergerie', to: '/conciergerie' },
       { label: 'Devenir livreur', to: '/inscription/livreur' },
+      { label: 'Devenir prestataire', to: '/prestataires' },
       { label: 'Se connecter', to: '/connexion' },
     ],
   },

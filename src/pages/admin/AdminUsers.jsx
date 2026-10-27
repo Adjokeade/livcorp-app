@@ -85,7 +85,7 @@ function TariffSheet({ user, onClose, onSaved }) {
 }
 
 function categoryOf(u) {
-  if (u.role === 'client') return u.account_type === 'entreprise' ? 'Entreprise' : 'Particulier';
+  if (u.role === 'client') return { entreprise: 'Entreprise', conciergerie: 'Conciergerie' }[u.account_type] ?? 'Particulier';
   return ROLE[u.role] ?? u.role;
 }
 
@@ -105,7 +105,7 @@ export default function AdminUsers() {
 
   useEffect(() => {
     const params = { page, q: term || undefined, status: status || undefined };
-    if (category === 'particulier' || category === 'entreprise') {
+    if (['particulier', 'entreprise', 'conciergerie'].includes(category)) {
       params.role = 'client';
       params.account_type = category;
     } else if (category) {
@@ -132,7 +132,7 @@ export default function AdminUsers() {
     <div>
       <div className="flex flex-wrap items-center gap-3">
         <SearchInput value={q} onChange={setQ} placeholder="Nom, e-mail, téléphone, entreprise…" />
-        <Select label="Catégorie" value={category} onChange={setCategory} options={[['', 'Toutes les catégories'], ['particulier', 'Particuliers'], ['entreprise', 'Entreprises'], ['livreur', 'Livreurs'], ['commercant', 'Commerçants']]} />
+        <Select label="Catégorie" value={category} onChange={setCategory} options={[['', 'Toutes les catégories'], ['particulier', 'Particuliers'], ['entreprise', 'Entreprises'], ['conciergerie', 'Conciergeries'], ['livreur', 'Livreurs'], ['commercant', 'Commerçants']]} />
         <Select label="Statut" value={status} onChange={setStatus} options={[['', 'Tous les statuts'], ['active', 'Actifs'], ['inactive', 'Désactivés']]} />
         {result && <span className="text-sm text-on-surface-variant">{result.total} compte{result.total > 1 ? 's' : ''}</span>}
       </div>

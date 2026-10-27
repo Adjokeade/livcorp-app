@@ -7,6 +7,7 @@ use App\Models\ContactMessage;
 use App\Models\Deliverer;
 use App\Models\Dispute;
 use App\Models\Order;
+use App\Models\ServiceProvider;
 use App\Models\Transaction;
 use App\Models\User;
 use Illuminate\Http\Request;
@@ -34,6 +35,7 @@ class DashboardController extends Controller
             'orders_disputed' => Order::where('status', Order::STATUS_LITIGE)->count(),
             // Pastilles du menu : ce qui attend une action de l'administration.
             'pending_deliverers' => Deliverer::where('verification_status', 'pending')->count(),
+            'pending_providers' => ServiceProvider::where('status', 'pending')->count(),
             'new_messages' => ContactMessage::where('status', 'nouveau')->count(),
             'open_disputes' => Dispute::whereIn('status', ['ouvert', 'en_cours'])->count(),
             'revenue_period' => Transaction::where('status', 'approved')

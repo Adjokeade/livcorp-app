@@ -12,6 +12,7 @@ import { ROLE_HOME } from '../../lib/roleHome';
 const ACCOUNT_TYPES = [
   { value: 'particulier', label: 'Particulier', description: 'Je veux faire livrer mes colis.' },
   { value: 'entreprise', label: 'Entreprise', description: 'Mon entreprise envoie des colis régulièrement.' },
+  { value: 'conciergerie', label: 'Conciergerie', description: 'Ma conciergerie confie courses et livraisons à des coursiers vérifiés.' },
 ];
 
 const PASSWORD_HINT = '8 caractères minimum, avec une majuscule, une minuscule et un chiffre.';
@@ -22,7 +23,7 @@ export default function Register() {
   const { register, status, error, clearError } = useAuthStore();
   const [form, setForm] = useState({
     role: 'client',
-    account_type: searchParams.get('account_type') === 'entreprise' ? 'entreprise' : 'particulier',
+    account_type: ['entreprise', 'conciergerie'].includes(searchParams.get('account_type')) ? searchParams.get('account_type') : 'particulier',
     company_name: '',
     first_name: '',
     last_name: '',
@@ -35,7 +36,9 @@ export default function Register() {
   });
   const [fieldErrors, setFieldErrors] = useState({});
 
-  const isEntreprise = form.account_type === 'entreprise';
+  // Entreprise et conciergerie sont des structures : nom commercial et gérant, pas de sexe.
+  const isEntreprise = form.account_type !== 'particulier';
+  const structureName = form.account_type === 'conciergerie' ? 'de la conciergerie' : "de l'entreprise";
   const hasFieldErrors = Object.keys(fieldErrors).length > 0;
 
   // Une erreur restée dans le store depuis une autre page (connexion…) ne doit pas s'afficher ici.
@@ -98,13 +101,13 @@ export default function Register() {
 
         <div className="mt-6">
           <span className="mb-1.5 block text-sm font-semibold">Je suis…</span>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {ACCOUNT_TYPES.map((opt) => (
               <button
                 type="button"
                 key={opt.value}
                 onClick={() => update('account_type', opt.value)}
-                className={`rounded border px-3 py-2 text-sm font-semibold transition ${
+                className={`min-w-0 break-words rounded border px-3 py-2 text-sm font-semibold transition last:col-span-2 sm:last:col-span-1 ${
                   form.account_type === opt.value
                     ? 'border-primary bg-primary-fixed text-on-primary-fixed-variant'
                     : 'border-outline-variant text-on-surface-variant'
@@ -122,7 +125,7 @@ export default function Register() {
         <form className="mt-6 flex flex-col gap-4" onSubmit={handleSubmit}>
           {isEntreprise && (
             <Input
-              label="Nom de l'entreprise"
+              label={`Nom ${structureName}`}
               name="company_name"
               required
               value={form.company_name}
