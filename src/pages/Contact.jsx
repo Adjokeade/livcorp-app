@@ -67,7 +67,7 @@ export default function Contact() {
             <Card>
               <p className="text-sm font-semibold text-on-surface-variant">E-mail</p>
               <a href="mailto:contact@livcorp.bj" className="mt-1 block font-display text-xl font-bold text-primary">
-                contact@livcorp.bj
+                livecorp6@gmail.com
               </a>
             </Card>
           </div>

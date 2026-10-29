@@ -62,8 +62,8 @@ export default function Footer() {
             La plateforme de livraison de colis et de courses qui connecte le Bénin, un trajet à la fois.
           </p>
           <p className="mt-4 flex flex-col gap-1 text-sm">
-            <a href="mailto:contact@livcorp.bj" className={`${LINK_CLASS} w-fit`}>
-              contact@livcorp.bj
+            <a href="mailto:livecorp6@gmail.com" className={`${LINK_CLASS} w-fit`}>
+              livecorp6@gmail.com
             </a>
             <a href="tel:+2290146620583" className={`${LINK_CLASS} w-fit`}>
               +229 01 46 62 05 83
