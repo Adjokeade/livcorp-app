@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import adminService from '../../services/adminService';
 import { Badge, Pager, SearchInput, Select, useDebounced } from './adminUi';
 import { Loading } from './AdminBackOffice';
+import AdminConciergeries from './AdminConciergeries';
 
 const STATUS = { pending: ['À examiner', 'warn'], approved: ['Validé', 'ok'], rejected: ['Refusé', 'bad'] };
 const PROFESSIONS = [
@@ -16,7 +17,7 @@ const PROFESSION_LABEL = {
 };
 
 // Candidatures des prestataires de services : à examiner d'abord, puis historique des décisions.
-export default function AdminProviders({ onCountChange }) {
+function Applications({ onCountChange }) {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('pending');
   const [profession, setProfession] = useState('');
@@ -122,6 +123,30 @@ export default function AdminProviders({ onCountChange }) {
         </ul>
       )}
       <Pager page={result?.current_page ?? 1} last={result?.last_page} onChange={setPage} />
+    </div>
+  );
+}
+
+// Prestataires : candidatures à valider, puis comptes conciergerie à valider.
+export default function AdminProviders({ onCountChange }) {
+  const [view, setView] = useState('applications');
+
+  return (
+    <div>
+      <div role="group" aria-label="Affichage" className="inline-flex rounded-lg border border-outline-variant p-0.5">
+        {[['applications', 'Candidatures'], ['conciergeries', 'Conciergeries']].map(([key, label]) => (
+          <button
+            type="button"
+            key={key}
+            onClick={() => setView(key)}
+            aria-pressed={view === key}
+            className={`rounded-md px-3 py-1.5 text-sm font-semibold ${view === key ? 'bg-primary text-on-primary' : 'text-on-surface-variant'}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div className="mt-5">{view === 'applications' ? <Applications onCountChange={onCountChange} /> : <AdminConciergeries onCountChange={onCountChange} />}</div>
     </div>
   );
 }

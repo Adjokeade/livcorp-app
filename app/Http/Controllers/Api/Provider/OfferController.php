@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api\Provider;
 
 use App\Http\Controllers\Controller;
 use App\Models\ServiceRequest;
+use App\Notifications\ServiceRequestTaken;
 use App\Services\AuditLogService;
 use Illuminate\Http\Request;
 
@@ -25,7 +26,7 @@ class OfferController extends Controller
             ->with('client:id,first_name')
             ->latest('id')
             ->paginate(20)
-            ->through(fn (ServiceRequest $r) => $this->present($r, false));
+            ->through(fn (ServiceRequest $r) => $r->present(false));
     }
 
     public function mine(Request $request)
@@ -34,7 +35,7 @@ class OfferController extends Controller
             ->with('client:id,first_name,last_name,phone')
             ->latest('taken_at')
             ->paginate(20)
-            ->through(fn (ServiceRequest $r) => $this->present($r, true));
+            ->through(fn (ServiceRequest $r) => $r->present(true));
     }
 
     public function accept(Request $request, ServiceRequest $serviceRequest)
@@ -47,26 +48,9 @@ class OfferController extends Controller
             ->update(['status' => 'taken', 'provider_id' => $provider->id, 'taken_at' => now()]);
         abort_unless($taken, 409, 'Cette offre n\'est plus disponible.');
 
+        rescue(fn () => $serviceRequest->client->notify(new ServiceRequestTaken($serviceRequest)));
         $this->auditLog->log('service_request.taken', $serviceRequest, ['provider_id' => $provider->id]);
 
-        return $this->present($serviceRequest->fresh('client:id,first_name,last_name,phone'), true);
-    }
-
-    private function present(ServiceRequest $r, bool $withContact): array
-    {
-        return [
-            'id' => $r->id,
-            'profession' => $r->profession,
-            'title' => $r->title,
-            'description' => $r->description,
-            'city' => $r->city,
-            'address' => $withContact ? $r->address : null,
-            'budget' => $r->budget,
-            'status' => $r->status,
-            'created_at' => $r->created_at,
-            'taken_at' => $r->taken_at,
-            'client_name' => $withContact ? trim($r->client->first_name.' '.$r->client->last_name) : $r->client->first_name,
-            'client_phone' => $withContact ? $r->client->phone : null,
-        ];
+        return $serviceRequest->fresh('client:id,first_name,last_name,phone')->present(true);
     }
 }

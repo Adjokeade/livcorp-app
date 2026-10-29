@@ -33,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => EnsureUserHasRole::class,
             'verified.email' => EnsureEmailIsVerified::class,
             'deliverer.verified' => EnsureDelivererIsVerified::class,
+            'conciergerie.approved' => \App\Http\Middleware\EnsureConciergerieIsApproved::class,
             'provider.approved' => \App\Http\Middleware\EnsureProviderIsApproved::class,
         ]);
 

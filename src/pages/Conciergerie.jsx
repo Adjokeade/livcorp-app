@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, Navigate } from 'react-router-dom';
 import useAuthStore from '../store/useAuthStore';
 import Card from '../components/common/Card';
 import Reveal from '../components/common/Reveal';
@@ -13,8 +13,8 @@ const SERVICES = [
 ];
 
 const STEPS = [
-  { title: 'Créez votre compte conciergerie', text: 'Quelques minutes suffisent : nom de votre structure, gérant, adresse.' },
-  { title: 'Passez vos demandes', text: 'Indiquez le départ, la destination et le colis. Le prix est fixé selon la distance.' },
+  { title: 'Créez votre compte conciergerie', text: 'Quelques minutes suffisent : nom de votre structure, gérant, adresse. Notre équipe valide votre compte.' },
+  { title: 'Prenez des missions', text: 'Une fois validé, vous voyez les missions publiées par les clients (courses, démarches, achats) et vous prenez celles qui vous conviennent.' },
   { title: 'Suivez et encaissez la remise', text: 'Un livreur vérifié prend la course, vous le suivez sur la carte jusqu\'à la remise.' },
 ];
 
@@ -22,7 +22,10 @@ const STEPS = [
 export default function Conciergerie() {
   const user = useAuthStore((s) => s.user);
   const isConciergerie = user?.role === 'client' && user.account_type === 'conciergerie';
-  const cta = user?.role === 'client' ? { to: '/client/commander', label: isConciergerie ? 'Nouvelle livraison' : 'Commander' } : { to: '/inscription?account_type=conciergerie', label: 'Créer un compte conciergerie' };
+  // Une conciergerie connectée retrouve directement ses missions.
+  if (isConciergerie) return <Navigate to="/conciergerie/missions" replace />;
+
+  const cta = user?.role === 'client' ? { to: '/client/commander', label: 'Commander' } : { to: '/inscription?account_type=conciergerie', label: 'Créer un compte conciergerie' };
 
   return (
     <>
@@ -43,8 +46,8 @@ export default function Conciergerie() {
                 {cta.label}
               </Link>
               {!user && (
-                <Link to="/connexion" className="btn-secondary">
-                  J'ai déjà un compte
+                <Link to="/connexion?profil=conciergerie" className="btn-secondary">
+                  Se connecter et voir les missions
                 </Link>
               )}
             </div>

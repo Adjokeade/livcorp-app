@@ -14,6 +14,7 @@ import Conciergerie from './pages/Conciergerie';
 import Prestataires from './pages/Prestataires';
 import ProviderOffers from './pages/provider/ProviderOffers';
 import ServiceRequests from './pages/client/ServiceRequests';
+import ConciergerieMissions from './pages/conciergerie/ConciergerieMissions';
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
 import RegisterDeliverer from './pages/auth/RegisterDeliverer';
@@ -34,7 +35,7 @@ import SavedAddresses from './pages/SavedAddresses';
 import DelivererDashboard from './pages/deliverer/DelivererDashboard';
 import MerchantDashboard from './pages/merchant/MerchantDashboard';
 import {
-  DashboardPage, DelivererDetailPage, DeliverersPage, FinancePage, DisputesPage, MessagesPage, OrdersPage, PricingPage, ProvidersPage, TasksPage, UsersPage,
+  DashboardPage, DelivererDetailPage, DeliverersPage, FinancePage, DisputesPage, MessagesPage, OrdersPage, PricingPage, ProvidersPage, ServiceRequestsPage, TasksPage, UsersPage,
 } from './pages/admin/AdminPages';
 import AdminLogin from './pages/admin/AdminLogin';
 import AdminLayout from './components/layouts/AdminLayout';
@@ -180,6 +181,15 @@ export default function App() {
           }
         />
 
+        <Route
+          path="/conciergerie/missions"
+          element={
+            <ProtectedRoute roles={['client']}>
+              <ConciergerieMissions />
+            </ProtectedRoute>
+          }
+        />
+
         {/* --- Prestataire --- */}
         <Route
           path="/prestataire/offres"
@@ -226,6 +236,7 @@ export default function App() {
         <Route path="/admin/livreurs/:id" element={<DelivererDetailPage />} />
         <Route path="/admin/utilisateurs" element={<UsersPage />} />
         <Route path="/admin/prestataires" element={<ProvidersPage />} />
+        <Route path="/admin/demandes-service" element={<ServiceRequestsPage />} />
         <Route path="/admin/livraisons" element={<OrdersPage />} />
         <Route path="/admin/litiges" element={<DisputesPage />} />
         <Route path="/admin/messages" element={<MessagesPage />} />

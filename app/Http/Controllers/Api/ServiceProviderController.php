@@ -66,7 +66,18 @@ class ServiceProviderController extends Controller
                 $user->forceFill(['email_verified_at' => now()])->save();
             }
 
-            return ServiceProvider::create(collect($validated)->except(['password', 'password_confirmation'])->all() + ['user_id' => $user->id]);
+            $data = collect($validated)->except(['password', 'password_confirmation'])->all() + ['user_id' => $user->id];
+
+            // Candidature déposée avant l'existence des comptes (même téléphone, aucun compte rattaché) : on la
+            // rattache au nouveau compte en gardant sa décision (validée, refusée…) plutôt que d'en ouvrir une seconde.
+            $legacy = ServiceProvider::whereNull('user_id')->where('phone', $validated['phone'])->first();
+            if ($legacy) {
+                $legacy->update($data);
+
+                return $legacy;
+            }
+
+            return ServiceProvider::create($data);
         });
 
         $this->auditLog->log('service_provider.applied', $provider);

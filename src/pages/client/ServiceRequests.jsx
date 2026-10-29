@@ -51,7 +51,7 @@ export default function ServiceRequests() {
       <h1 className="font-display text-2xl font-bold">Demander un service</h1>
 
       <Card>
-        <h2 className="font-display text-lg font-bold">Publier une offre de prestation</h2>
+        <h2 className="font-display text-lg font-bold">Publier une offre de prestation ou une mission de conciergerie</h2>
         <form className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2" onSubmit={submit}>
           {state.error && <p role="alert" className="rounded bg-error-container px-3 py-2 text-sm text-on-error-container sm:col-span-2">{state.error}</p>}
           <div>
@@ -90,6 +90,12 @@ export default function ServiceRequests() {
                   <span className="rounded-full bg-surface-container px-2.5 py-0.5 text-xs font-semibold">{STATUS[r.status] ?? r.status}</span>
                 </div>
                 <p className="mt-0.5 text-sm text-on-surface-variant">{PROFESSION_LABEL[r.profession] ?? r.profession} · {r.city}{r.budget ? ` · ${formatFcfa(r.budget)}` : ''}</p>
+                {r.status === 'taken' && !r.provider && r.conciergerie && (
+                  <p className="mt-2 text-sm">
+                    Conciergerie : <span className="font-semibold">{r.conciergerie.company_name || `${r.conciergerie.first_name} ${r.conciergerie.last_name}`}</span> ·{' '}
+                    <a href={`tel:${r.conciergerie.phone}`} className="font-semibold text-secondary">{r.conciergerie.phone}</a>
+                  </p>
+                )}
                 {r.status === 'taken' && r.provider && (
                   <p className="mt-2 text-sm">
                     Prestataire : <span className="font-semibold">{r.provider.first_name} {r.provider.last_name}</span> ·{' '}

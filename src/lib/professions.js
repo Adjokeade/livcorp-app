@@ -12,6 +12,7 @@ export const PROFESSION_LABEL = {
   climatisation: 'Frigoriste / climatisation',
   menage: 'Ménage et entretien',
   autre: 'Autre métier',
+  conciergerie: 'Mission de conciergerie',
 };
 
 export const PROFESSION_OPTIONS = Object.entries(PROFESSION_LABEL).map(([value, label]) => ({ value, label }));

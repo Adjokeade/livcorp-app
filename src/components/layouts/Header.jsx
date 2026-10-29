@@ -26,8 +26,10 @@ const NAV_LINKS = [
 export default function Header() {
   const { user, logout } = useAuthStore();
   // Prestations : inscription et connexion des prestataires ; une fois connecté, l'entrée mène aux offres.
+  const isConciergerie = user?.role === 'client' && user.account_type === 'conciergerie';
   const links = [
-    ...NAV_LINKS.slice(0, 3),
+    ...NAV_LINKS.slice(0, 2),
+    isConciergerie ? { to: '/conciergerie/missions', label: 'Missions conciergerie' } : NAV_LINKS[2],
     user?.role === 'prestataire' ? { to: '/prestataire/offres', label: 'Offres de prestation' } : { to: '/prestataires', label: 'Prestations' },
     ...NAV_LINKS.slice(3),
   ];

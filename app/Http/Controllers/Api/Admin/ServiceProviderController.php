@@ -4,6 +4,8 @@ namespace App\Http\Controllers\Api\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\ServiceProvider;
+use App\Models\ServiceRequest;
+use App\Notifications\ServiceProviderDecision;
 use App\Services\AuditLogService;
 use Illuminate\Http\Request;
 use Illuminate\Validation\Rule;
@@ -43,6 +45,7 @@ class ServiceProviderController extends Controller
         ]);
 
         $this->auditLog->log('service_provider.approved', $serviceProvider);
+        $this->tell($serviceProvider);
 
         return $serviceProvider->fresh();
     }
@@ -59,7 +62,26 @@ class ServiceProviderController extends Controller
         ]);
 
         $this->auditLog->log('service_provider.rejected', $serviceProvider, ['reason' => $validated['reason']]);
+        $this->tell($serviceProvider);
 
         return $serviceProvider->fresh();
+    }
+
+    private function tell(ServiceProvider $provider): void
+    {
+        if ($provider->user) {
+            rescue(fn () => $provider->user->notify(new ServiceProviderDecision($provider)));
+        }
+    }
+
+    /** Modération : retire une offre inappropriée (ouverte ou déjà prise). */
+    public function cancelRequest(ServiceRequest $serviceRequest)
+    {
+        abort_if($serviceRequest->status === 'cancelled', 422, 'Cette offre est déjà annulée.');
+
+        $serviceRequest->update(['status' => 'cancelled']);
+        $this->auditLog->log('service_request.cancelled_by_admin', $serviceRequest);
+
+        return $serviceRequest->fresh(['client:id,first_name,last_name,phone,email', 'provider:id,first_name,last_name,phone,profession', 'conciergerie:id,first_name,last_name,phone,company_name']);
     }
 }

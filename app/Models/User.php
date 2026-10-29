@@ -17,7 +17,7 @@ class User extends Authenticatable implements MustVerifyEmail
 
     protected $fillable = [
         'role', 'account_type', 'company_id', 'team_role', 'first_name', 'last_name', 'company_name', 'sex', 'address',
-        'email', 'phone', 'password', 'avatar_path', 'is_active',
+        'email', 'phone', 'password', 'avatar_path', 'is_active', 'conciergerie_status', 'conciergerie_rejection_reason',
     ];
 
     protected $hidden = [
@@ -70,6 +70,7 @@ class User extends Authenticatable implements MustVerifyEmail
     public function isCommercant(): bool { return $this->role === 'commercant'; }
     public function isLivreur(): bool { return $this->role === 'livreur'; }
     public function isAdmin(): bool { return $this->role === 'admin'; }
+    public function isConciergerie(): bool { return $this->role === 'client' && $this->account_type === 'conciergerie'; }
     public function isPrestataire(): bool { return $this->role === 'prestataire'; }
 
     // --- Relations ---

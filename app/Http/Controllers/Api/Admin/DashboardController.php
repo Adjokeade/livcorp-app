@@ -36,6 +36,7 @@ class DashboardController extends Controller
             // Pastilles du menu : ce qui attend une action de l'administration.
             'pending_deliverers' => Deliverer::where('verification_status', 'pending')->count(),
             'pending_providers' => ServiceProvider::where('status', 'pending')->count(),
+            'pending_conciergeries' => User::where('account_type', 'conciergerie')->where('conciergerie_status', 'pending')->count(),
             'new_messages' => ContactMessage::where('status', 'nouveau')->count(),
             'open_disputes' => Dispute::whereIn('status', ['ouvert', 'en_cours'])->count(),
             'revenue_period' => Transaction::where('status', 'approved')

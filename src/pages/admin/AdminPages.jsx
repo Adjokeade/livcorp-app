@@ -6,6 +6,7 @@ import AdminFinance from './AdminFinance';
 import AdminOrders from './AdminOrders';
 import AdminPricing from './AdminPricing';
 import AdminProviders from './AdminProviders';
+import AdminServiceRequests from './AdminServiceRequests';
 import AdminUsers from './AdminUsers';
 
 // Une page par entrée du menu horizontal : titre, puis le contenu de la section.
@@ -30,6 +31,7 @@ export function ProvidersPage() {
   const { refreshBadges } = useOutletContext();
   return <Section title="Prestataires"><AdminProviders onCountChange={refreshBadges} /></Section>;
 }
+export const ServiceRequestsPage = () => <Section title="Demandes de service"><AdminServiceRequests /></Section>;
 export const PricingPage = () => <Section title="Tarifs"><AdminPricing /></Section>;
 
 export function MessagesPage() {

@@ -58,6 +58,8 @@ class AuthController extends Controller
             $user = User::create([
                 'role' => $validated['role'],
                 'account_type' => $validated['account_type'] ?? null,
+                // Une conciergerie attend la validation de l'administration avant d'accéder aux missions.
+                'conciergerie_status' => ($validated['account_type'] ?? null) === 'conciergerie' && $validated['role'] === 'client' ? 'pending' : null,
                 'company_name' => $validated['company_name'] ?? null,
                 'first_name' => $validated['first_name'],
                 'last_name' => $validated['last_name'],
@@ -102,6 +104,10 @@ class AuthController extends Controller
         }
 
         $this->auditLog->log('user.registered', $user);
+
+        if ($user->isConciergerie()) {
+            rescue(fn () => \Illuminate\Support\Facades\Notification::send(User::where('role', 'admin')->where('is_active', true)->get(), new \App\Notifications\ConciergerieApplied($user)));
+        }
 
         return response()->json([
             'message' => config('app.email_verification_required')

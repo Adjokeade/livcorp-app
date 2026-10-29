@@ -29,8 +29,14 @@ export function isTeamManager(user) {
 const TEAM = { to: '/client/equipe', label: 'Mon équipe', icon: 'team' };
 const BATCH = { to: '/client/lot', label: 'Envoi en lot', icon: 'layers' };
 
+// Missions de conciergerie : réservées aux comptes conciergerie, juste après « Nouvelle livraison ».
+const MISSIONS = { to: '/conciergerie/missions', label: 'Missions conciergerie', short: 'Missions', icon: 'star' };
+
 export function menuFor(user) {
-  const menu = MENUS[user?.role] ?? [];
+  const base = MENUS[user?.role] ?? [];
+  const menu = user?.role === 'client' && user.account_type === 'conciergerie'
+    ? [...base.slice(0, 2), MISSIONS, ...base.slice(2)]
+    : base;
   if (user?.role !== 'client' || user.account_type !== 'entreprise') return menu;
   const at = menu.findIndex((item) => item.to === '/client/commander') + 1;
   const withBatch = [...menu.slice(0, at), BATCH, ...menu.slice(at)];

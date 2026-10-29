@@ -44,8 +44,22 @@ const adminService = {
 
   // Candidatures des prestataires de services (plombiers, coiffeuses, informaticiens…).
   serviceProviders: (params = {}) => api.get('/admin/service-providers', { params }).then((r) => r.data),
+  // Comptes conciergerie : validation par l'administration.
+  conciergeries: (params = {}) => api.get('/admin/conciergeries', { params }).then((r) => r.data),
+  approveConciergerie: (id) => api.post(`/admin/conciergeries/${id}/approve`).then((r) => r.data),
+  rejectConciergerie: (id, reason) => api.post(`/admin/conciergeries/${id}/reject`, { reason }).then((r) => r.data),
+
   approveServiceProvider: (id) => api.post(`/admin/service-providers/${id}/approve`).then((r) => r.data),
   rejectServiceProvider: (id, reason) => api.post(`/admin/service-providers/${id}/reject`, { reason }).then((r) => r.data),
+
+  // Demandes de service des clients (supervision) : le prestataire prend toujours lui-même l'offre
+  // ouverte (voir côté prestataire) ; cette vue permet juste de suivre et, au besoin, de contacter
+  // soi-même un prestataire correspondant.
+  serviceRequests: (params = {}) => api.get('/admin/service-requests', { params }).then((r) => r.data),
+  matchingProviders: (serviceRequestId) => api.get(`/admin/service-requests/${serviceRequestId}/providers`).then((r) => r.data),
+
+  // Modération : retire une offre de prestation ou de conciergerie.
+  cancelServiceRequest: (id) => api.post(`/admin/service-requests/${id}/cancel`).then((r) => r.data),
 
   // Messages du formulaire Contactez-nous ; la réponse porte aussi `new_count` (non lus).
   messages: ({ status, page = 1 } = {}) =>

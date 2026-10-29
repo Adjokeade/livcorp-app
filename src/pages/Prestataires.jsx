@@ -118,6 +118,8 @@ export default function Prestataires() {
           <Link to="/connexion?profil=prestataire" className="font-semibold text-secondary">
             Se connecter et voir les offres
           </Link>
+          <br />
+          Candidat avant la création des comptes ? Inscrivez-vous avec le même téléphone : votre dossier est retrouvé.
         </p>
       </div>
 

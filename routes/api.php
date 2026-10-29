@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\Admin\DelivererController as AdminDelivererControll
 use App\Http\Controllers\Api\Admin\FinanceController;
 use App\Http\Controllers\Api\Admin\OrderController as AdminOrderController;
 use App\Http\Controllers\Api\Admin\ServiceProviderController as AdminServiceProviderController;
+use App\Http\Controllers\Api\Admin\ServiceRequestController as AdminServiceRequestController;
 use App\Http\Controllers\Api\Admin\TariffController;
 use App\Http\Controllers\Api\Admin\UserController as AdminUserController;
 use App\Http\Controllers\Api\Auth\AuthController;
@@ -20,6 +21,8 @@ use App\Http\Controllers\Api\Client\FavoriteDelivererController;
 use App\Http\Controllers\Api\Client\RecipientController;
 use App\Http\Controllers\Api\Client\ServiceRequestController;
 use App\Http\Controllers\Api\Client\TeamController;
+use App\Http\Controllers\Api\Conciergerie\MissionController;
+use App\Http\Controllers\Api\Admin\ConciergerieController as AdminConciergerieController;
 use App\Http\Controllers\Api\Provider\OfferController as ProviderOfferController;
 use App\Http\Controllers\Api\Client\PaymentController;
 use App\Http\Controllers\Api\Client\ReviewController as ClientReviewController;
@@ -193,6 +196,14 @@ Route::prefix('v1')->group(function () {
             Route::post('/offers/{serviceRequest}/accept', [ProviderOfferController::class, 'accept'])->middleware('throttle:30,1');
         });
 
+        // ===== CONCIERGERIE =====
+        // Compte client de type conciergerie ; les missions ne s'ouvrent qu'après validation par l'administration.
+        Route::middleware(['role:client', 'verified.email', 'conciergerie.approved'])->prefix('conciergerie')->group(function () {
+            Route::get('/missions', [MissionController::class, 'index']);
+            Route::get('/missions/mine', [MissionController::class, 'mine']);
+            Route::post('/missions/{serviceRequest}/accept', [MissionController::class, 'accept'])->middleware('throttle:30,1');
+        });
+
         // ===== COMMERÇANT =====
         Route::middleware(['role:commercant', 'verified.email'])->prefix('merchant')->group(function () {
             Route::get('/shop', [ShopController::class, 'show']);
@@ -234,6 +245,13 @@ Route::prefix('v1')->group(function () {
             Route::get('/service-providers', [AdminServiceProviderController::class, 'index']);
             Route::post('/service-providers/{serviceProvider}/approve', [AdminServiceProviderController::class, 'approve']);
             Route::post('/service-providers/{serviceProvider}/reject', [AdminServiceProviderController::class, 'reject']);
+            Route::get('/conciergeries', [AdminConciergerieController::class, 'index']);
+            Route::post('/conciergeries/{user}/approve', [AdminConciergerieController::class, 'approve']);
+            Route::post('/conciergeries/{user}/reject', [AdminConciergerieController::class, 'reject']);
+            Route::post('/service-requests/{serviceRequest}/cancel', [AdminServiceProviderController::class, 'cancelRequest']);
+
+            Route::get('/service-requests', [AdminServiceRequestController::class, 'index']);
+            Route::get('/service-requests/{serviceRequest}/providers', [AdminServiceRequestController::class, 'matchingProviders']);
 
             Route::get('/messages', [AdminContactMessageController::class, 'index']);
             Route::patch('/messages/{contactMessage}/status', [AdminContactMessageController::class, 'updateStatus']);

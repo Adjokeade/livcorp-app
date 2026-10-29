@@ -372,4 +372,237 @@ class ServicesExpansionTest extends TestCase
         $this->actingAs($provider, 'sanctum')->postJson('/api/v1/client/service-requests', [])->assertForbidden();
         $this->getJson('/api/v1/admin/service-providers')->assertForbidden();
     }
+
+    // --- Supervision admin des demandes de service ---
+
+    public function test_admin_lists_service_requests_with_client_contact_and_filters(): void
+    {
+        $client = $this->client();
+        $plumbing = $this->offer($client);
+        $this->offer($client, ['profession' => 'coiffeur', 'title' => 'Coiffure mariage', 'description' => 'Coiffure et maquillage pour un mariage.', 'city' => 'Porto-Novo']);
+
+        $admin = $this->admin();
+        $this->actingAs($admin, 'sanctum')->getJson('/api/v1/admin/service-requests')
+            ->assertOk()->assertJsonCount(2, 'data')
+            ->assertJsonPath('data.1.id', $plumbing) // la plus ancienne en dernier ("latest" en premier)
+            ->assertJsonPath('data.1.client.phone', '+22901000077');
+
+        $this->getJson('/api/v1/admin/service-requests?profession=coiffeur')->assertJsonCount(1, 'data')->assertJsonPath('data.0.city', 'Porto-Novo');
+        $this->getJson('/api/v1/admin/service-requests?city=Cotonou')->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $plumbing);
+        $this->getJson('/api/v1/admin/service-requests?q=évier')->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $plumbing);
+
+        $provider = $this->approvedProvider('plombier', '1');
+        $this->actingAs($provider, 'sanctum')->postJson("/api/v1/provider/offers/{$plumbing}/accept")->assertOk();
+        $this->actingAs($admin, 'sanctum')->getJson('/api/v1/admin/service-requests?status=taken')
+            ->assertJsonCount(1, 'data')->assertJsonPath('data.0.provider.phone', '+2290110000'.'1');
+    }
+
+    public function test_admin_sees_matching_approved_providers_for_an_open_request_city_first(): void
+    {
+        $id = $this->offer($this->client(), ['city' => 'Cotonou']);
+        $sameCity = $this->approvedProvider('plombier', '1')->serviceProvider;
+        $sameCity->update(['city' => 'Cotonou']);
+        $otherCity = $this->approvedProvider('plombier', '2')->serviceProvider;
+        $otherCity->update(['city' => 'Parakou']);
+        // Jamais remonté : pas encore validé, ou mauvais métier.
+        $this->postJson('/api/v1/service-providers', $this->provider(['email' => 'pending@test.bj', 'phone' => '+22901100003']))->assertCreated();
+        $this->approvedProvider('coiffeur', '4');
+
+        $this->actingAs($this->admin(), 'sanctum')->getJson("/api/v1/admin/service-requests/{$id}/providers")
+            ->assertOk()->assertJsonCount(2)
+            ->assertJsonPath('0.id', $sameCity->id)->assertJsonPath('0.city', 'Cotonou')
+            ->assertJsonPath('1.id', $otherCity->id);
+    }
+
+    public function test_admin_service_requests_areas_are_closed_to_other_roles(): void
+    {
+        $this->actingAs($this->client(), 'sanctum')->getJson('/api/v1/admin/service-requests')->assertForbidden();
+        $this->actingAs($this->approvedProvider(), 'sanctum')->getJson('/api/v1/admin/service-requests')->assertForbidden();
+    }
+
+    // --- Notifications, administration des offres, anciens prestataires ---
+
+    public function test_new_offer_notifies_only_approved_providers_of_that_profession(): void
+    {
+        \Illuminate\Support\Facades\Notification::fake();
+        $client = $this->client();
+        $plumber = $this->approvedProvider('plombier', '1');
+        $hairdresser = $this->approvedProvider('coiffeur', '2');
+        $this->postJson('/api/v1/service-providers', $this->provider(['email' => 'p3@test.bj', 'phone' => '+22901100003']))->assertCreated(); // en attente
+
+        $this->offer($client);
+
+        \Illuminate\Support\Facades\Notification::assertSentTo($plumber, \App\Notifications\NewServiceRequest::class);
+        \Illuminate\Support\Facades\Notification::assertNotSentTo($hairdresser, \App\Notifications\NewServiceRequest::class);
+        \Illuminate\Support\Facades\Notification::assertNotSentTo(User::where('email', 'p3@test.bj')->first(), \App\Notifications\NewServiceRequest::class);
+    }
+
+    public function test_client_is_told_when_an_offer_is_taken_and_provider_when_reviewed(): void
+    {
+        \Illuminate\Support\Facades\Notification::fake();
+        $client = $this->client();
+        $id = $this->offer($client);
+        $provider = $this->approvedProvider();
+
+        $this->actingAs($provider, 'sanctum')->postJson("/api/v1/provider/offers/{$id}/accept")->assertOk();
+        \Illuminate\Support\Facades\Notification::assertSentTo($client, \App\Notifications\ServiceRequestTaken::class);
+
+        $this->postJson('/api/v1/service-providers', $this->provider(['email' => 'p4@test.bj', 'phone' => '+22901100004']))->assertCreated();
+        $pending = ServiceProvider::where('phone', '+22901100004')->first();
+        $this->actingAs($this->admin(), 'sanctum')->postJson("/api/v1/admin/service-providers/{$pending->id}/approve")->assertOk();
+        \Illuminate\Support\Facades\Notification::assertSentTo($pending->user, \App\Notifications\ServiceProviderDecision::class);
+    }
+
+    public function test_admin_lists_and_moderates_service_requests(): void
+    {
+        $client = $this->client();
+        $open = $this->offer($client);
+        $this->offer($client, ['profession' => 'coiffeur', 'title' => 'Coiffure mariage']);
+        $provider = $this->approvedProvider();
+        $this->actingAs($provider, 'sanctum')->postJson("/api/v1/provider/offers/{$open}/accept")->assertOk();
+
+        $this->actingAs($this->admin(), 'sanctum');
+        $this->getJson('/api/v1/admin/service-requests')->assertOk()->assertJsonCount(2, 'data');
+        $this->getJson('/api/v1/admin/service-requests?status=taken')->assertJsonCount(1, 'data')->assertJsonPath('data.0.provider.phone', '+22901100001');
+        $this->getJson('/api/v1/admin/service-requests?profession=coiffeur')->assertJsonCount(1, 'data');
+        $this->getJson('/api/v1/admin/service-requests?q=mariage')->assertJsonCount(1, 'data');
+
+        $this->postJson("/api/v1/admin/service-requests/{$open}/cancel")->assertOk()->assertJsonPath('status', 'cancelled');
+        $this->postJson("/api/v1/admin/service-requests/{$open}/cancel")->assertUnprocessable();
+        $this->assertDatabaseHas('audit_logs', ['action' => 'service_request.cancelled_by_admin']);
+    }
+
+    public function test_service_request_admin_routes_are_closed_to_others(): void
+    {
+        $id = $this->offer($this->client());
+        $this->getJson('/api/v1/admin/service-requests')->assertForbidden();
+        $this->postJson("/api/v1/admin/service-requests/{$id}/cancel")->assertForbidden();
+        $this->actingAs($this->approvedProvider(), 'sanctum')->getJson('/api/v1/admin/service-requests')->assertForbidden();
+    }
+
+    public function test_legacy_application_is_attached_to_the_new_account_keeping_its_status(): void
+    {
+        $legacy = ServiceProvider::create([
+            'first_name' => 'Ancien', 'last_name' => 'Plombier', 'phone' => '+22901000060', 'profession' => 'plombier',
+            'city' => 'Cotonou', 'experience_years' => 3, 'description' => 'Ancienne candidature sans compte.', 'status' => 'approved',
+        ]);
+
+        $this->postJson('/api/v1/service-providers', $this->provider())->assertCreated();
+
+        $this->assertSame(1, ServiceProvider::count());
+        $legacy->refresh();
+        $this->assertSame('approved', $legacy->status);
+        $this->assertSame('paul@test.bj', $legacy->user->email);
+
+        $this->postJson('/api/v1/auth/login', ['email' => 'paul@test.bj', 'password' => 'Passw0rdX', 'category' => 'prestataire'])
+            ->assertOk()->assertJsonPath('user.service_provider.status', 'approved');
+    }
+
+    // --- Conciergeries : validation, missions, notifications, administration ---
+
+    private function approvedConciergerie(string $suffix = '1'): User
+    {
+        $this->postJson('/api/v1/auth/register', $this->conciergerie(['email' => "conc{$suffix}@test.bj", 'phone' => '+2290120000'.$suffix]))->assertCreated();
+        $user = User::where('email', "conc{$suffix}@test.bj")->first();
+        $user->update(['conciergerie_status' => 'approved']);
+
+        return $user;
+    }
+
+    public function test_new_conciergerie_is_pending_and_notifies_admins(): void
+    {
+        \Illuminate\Support\Facades\Notification::fake();
+        $admin = $this->admin();
+
+        $this->postJson('/api/v1/auth/register', $this->conciergerie())->assertCreated()->assertJsonPath('user.conciergerie_status', 'pending');
+
+        \Illuminate\Support\Facades\Notification::assertSentTo($admin, \App\Notifications\ConciergerieApplied::class);
+        $this->postJson('/api/v1/auth/register', $this->conciergerie(['account_type' => 'particulier', 'sex' => 'homme', 'company_name' => null, 'email' => 'p@test.bj', 'phone' => '+22901000099']))
+            ->assertJsonPath('user.conciergerie_status', null);
+    }
+
+    public function test_pending_conciergerie_has_no_access_to_missions(): void
+    {
+        $this->postJson('/api/v1/auth/register', $this->conciergerie())->assertCreated();
+        $user = User::where('email', 'soleil@test.bj')->first();
+
+        $this->actingAs($user, 'sanctum')->getJson('/api/v1/conciergerie/missions')->assertForbidden();
+        $this->actingAs($this->client(), 'sanctum')->getJson('/api/v1/conciergerie/missions')->assertForbidden();
+    }
+
+    public function test_conciergerie_sees_and_takes_missions_and_client_is_told(): void
+    {
+        \Illuminate\Support\Facades\Notification::fake();
+        $first = $this->approvedConciergerie('1');
+        $second = $this->approvedConciergerie('2');
+        $client = $this->client();
+        $mission = $this->offer($client, ['profession' => 'conciergerie', 'title' => 'Retrait de documents']);
+        $plumbing = $this->offer($client);
+
+        \Illuminate\Support\Facades\Notification::assertSentTo($first, \App\Notifications\NewServiceRequest::class);
+
+        $this->actingAs($first, 'sanctum')->getJson('/api/v1/conciergerie/missions')
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $mission)->assertJsonPath('data.0.client_phone', null);
+
+        $this->postJson("/api/v1/conciergerie/missions/{$plumbing}/accept")->assertForbidden();
+        $this->postJson("/api/v1/conciergerie/missions/{$mission}/accept")->assertOk()->assertJsonPath('client_phone', '+22901000077');
+        $this->getJson('/api/v1/conciergerie/missions/mine')->assertJsonCount(1, 'data');
+        \Illuminate\Support\Facades\Notification::assertSentTo($client, \App\Notifications\ServiceRequestTaken::class);
+
+        $this->actingAs($second, 'sanctum')->postJson("/api/v1/conciergerie/missions/{$mission}/accept")->assertStatus(409);
+
+        $this->actingAs($client, 'sanctum')->getJson('/api/v1/client/service-requests')
+            ->assertJsonPath('data.1.conciergerie.company_name', 'Conciergerie Soleil');
+    }
+
+    public function test_conciergerie_does_not_see_or_take_its_own_missions_and_providers_do_not_see_missions(): void
+    {
+        $conc = $this->approvedConciergerie();
+        $own = $this->offer($conc, ['profession' => 'conciergerie']);
+
+        $this->actingAs($conc, 'sanctum')->getJson('/api/v1/conciergerie/missions')->assertJsonCount(0, 'data');
+        $this->postJson("/api/v1/conciergerie/missions/{$own}/accept")->assertForbidden();
+
+        $this->actingAs($this->approvedProvider(), 'sanctum')->getJson('/api/v1/provider/offers')->assertJsonCount(0, 'data');
+    }
+
+    public function test_admin_validates_and_rejects_conciergeries(): void
+    {
+        \Illuminate\Support\Facades\Notification::fake();
+        $this->postJson('/api/v1/auth/register', $this->conciergerie())->assertCreated();
+        $this->postJson('/api/v1/auth/register', $this->conciergerie(['email' => 'b@test.bj', 'phone' => '+22901000052', 'company_name' => 'Autre Conciergerie']))->assertCreated();
+        $a = User::where('email', 'soleil@test.bj')->first();
+        $b = User::where('email', 'b@test.bj')->first();
+
+        $this->actingAs($this->admin(), 'sanctum');
+        $this->getJson('/api/v1/admin/conciergeries?status=pending')->assertOk()->assertJsonCount(2, 'data');
+        $this->getJson('/api/v1/admin/conciergeries?q=Autre')->assertJsonCount(1, 'data');
+        $this->getJson('/api/v1/admin/dashboard/stats')->assertJsonPath('pending_conciergeries', 2);
+
+        $this->postJson("/api/v1/admin/conciergeries/{$a->id}/approve")->assertOk()->assertJsonPath('conciergerie_status', 'approved');
+        $this->postJson("/api/v1/admin/conciergeries/{$b->id}/reject", [])->assertUnprocessable();
+        $this->postJson("/api/v1/admin/conciergeries/{$b->id}/reject", ['reason' => 'Dossier incomplet'])->assertOk()->assertJsonPath('conciergerie_status', 'rejected');
+
+        \Illuminate\Support\Facades\Notification::assertSentTo($a, \App\Notifications\ConciergerieDecision::class);
+        $this->getJson('/api/v1/admin/dashboard/stats')->assertJsonPath('pending_conciergeries', 0);
+        $this->postJson('/api/v1/admin/conciergeries/'.$this->client()->id.'/approve')->assertNotFound();
+        $this->assertDatabaseHas('audit_logs', ['action' => 'conciergerie.approved']);
+    }
+
+    public function test_conciergerie_admin_routes_are_closed_to_others(): void
+    {
+        $conc = $this->approvedConciergerie();
+        $this->getJson('/api/v1/admin/conciergeries')->assertUnauthorized();
+        $this->actingAs($conc, 'sanctum')->getJson('/api/v1/admin/conciergeries')->assertForbidden();
+        $this->postJson("/api/v1/admin/conciergeries/{$conc->id}/reject", ['reason' => 'x'])->assertForbidden();
+    }
+
+    public function test_admin_sees_conciergerie_missions_among_requests(): void
+    {
+        $client = $this->client();
+        $this->offer($client, ['profession' => 'conciergerie', 'title' => 'Mission admin']);
+
+        $this->actingAs($this->admin(), 'sanctum')->getJson('/api/v1/admin/service-requests?profession=conciergerie')
+            ->assertOk()->assertJsonCount(1, 'data');
+    }
 }

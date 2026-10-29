@@ -13,6 +13,7 @@ const MENU = [
   { to: '/admin/livreurs', label: 'Livreurs', badge: 'pending_deliverers' },
   { to: '/admin/utilisateurs', label: 'Utilisateurs' },
   { to: '/admin/prestataires', label: 'Prestataires', badge: 'pending_providers' },
+  { to: '/admin/demandes-service', label: 'Demandes de service' },
   { to: '/admin/livraisons', label: 'Livraisons' },
   { to: '/admin/litiges', label: 'Litiges', badge: 'open_disputes' },
   { to: '/admin/messages', label: 'Messages', badge: 'new_messages' },
@@ -38,7 +39,7 @@ export default function AdminLayout() {
 
   // Compteurs du menu : relus à l'arrivée, puis chaque minute (onglet visible) et après chaque action des sections.
   const refreshBadges = useCallback(() => {
-    adminService.stats('day').then((s) => setBadges({ pending_deliverers: s.pending_deliverers, open_disputes: s.open_disputes, new_messages: s.new_messages, pending_providers: s.pending_providers })).catch(() => {});
+    adminService.stats('day').then((s) => setBadges({ pending_deliverers: s.pending_deliverers, open_disputes: s.open_disputes, new_messages: s.new_messages, pending_providers: (s.pending_providers ?? 0) + (s.pending_conciergeries ?? 0) })).catch(() => {});
   }, []);
 
   useEffect(() => {
