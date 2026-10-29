@@ -155,7 +155,7 @@ class AuthController extends Controller
             'password' => 'required|string',
             // Catégorie choisie sur l'écran de connexion (optionnelle : l'auto-connexion
             // après inscription et les anciens clients ne l'envoient pas).
-            'category' => 'nullable|in:particulier,entreprise,conciergerie,livreur,commercant',
+            'category' => 'nullable|in:particulier,entreprise,conciergerie,livreur,commercant,prestataire',
         ]);
         $category = $credentials['category'] ?? null;
         unset($credentials['category']);
@@ -221,6 +221,7 @@ class AuthController extends Controller
             'user' => $user->load([
                 'deliverer',
                 'merchant',
+                'serviceProvider',
                 'documents' => fn ($q) => $q->select('id', 'user_id', 'type', 'status'),
             ]),
             'token' => $token->plainTextToken,
@@ -239,6 +240,7 @@ class AuthController extends Controller
             'entreprise' => 'entreprise',
             'conciergerie' => 'conciergerie',
             'livreur' => 'livreur',
+            'prestataire' => 'prestataire',
             'commercant' => 'commerçant',
         };
     }
@@ -262,6 +264,7 @@ class AuthController extends Controller
         return response()->json($request->user()->load([
             'deliverer',
             'merchant',
+            'serviceProvider',
             'documents' => fn ($q) => $q->select('id', 'user_id', 'type', 'status'),
         ]));
     }

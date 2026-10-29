@@ -9,12 +9,14 @@ const MENUS = {
     { to: '/client/accueil', label: 'Accueil', icon: 'home', primary: true },
     { to: '/client/commander', label: 'Nouvelle livraison', short: 'Commander', icon: 'plus', primary: true },
     { to: '/client/commandes', label: 'Mes livraisons', short: 'Livraisons', icon: 'box', primary: true },
+    { to: '/client/services', label: 'Demander un service', icon: 'layers' },
     { to: '/client/destinataires', label: 'Destinataires', icon: 'book' },
     { to: '/client/favoris', label: 'Livreurs favoris', icon: 'star' },
     ADDRESSES,
     PROFILE,
   ],
   livreur: [{ to: '/deliverer/tableau-de-bord', label: 'Tableau de bord', icon: 'home' }, PROFILE],
+  prestataire: [{ to: '/prestataire/offres', label: 'Offres de prestation', short: 'Offres', icon: 'box' }, PROFILE],
   commercant: [{ to: '/merchant/tableau-de-bord', label: 'Tableau de bord', icon: 'home' }, ADDRESSES, PROFILE],
 };
 
@@ -41,6 +43,7 @@ export function menuFor(user) {
 export function categoryLabel(user) {
   if (user?.role === 'client') return { entreprise: 'Entreprise', conciergerie: 'Conciergerie' }[user.account_type] ?? 'Particulier';
   if (user?.role === 'livreur') return 'Livreur';
+  if (user?.role === 'prestataire') return 'Prestataire';
   if (user?.role === 'commercant') return 'Commerçant';
   return '';
 }

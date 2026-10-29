@@ -3,6 +3,7 @@ export const ROLE_HOME = {
   client: '/client/accueil',
   commercant: '/merchant/tableau-de-bord',
   livreur: '/deliverer/tableau-de-bord',
+  prestataire: '/prestataire/offres',
   admin: '/admin',
 };
 

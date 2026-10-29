@@ -14,6 +14,7 @@ const PROFILES = [
   { value: 'entreprise', label: 'Entreprise', registerTo: '/inscription?account_type=entreprise' },
   { value: 'conciergerie', label: 'Conciergerie', registerTo: '/inscription?account_type=conciergerie' },
   { value: 'livreur', label: 'Livreur', registerTo: '/inscription/livreur' },
+  { value: 'prestataire', label: 'Prestataire', registerTo: '/prestataires' },
 ];
 
 export default function Login() {
@@ -22,7 +23,7 @@ export default function Login() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const justVerified = searchParams.get('verified') === '1';
-  const [profile, setProfile] = useState('particulier');
+  const [profile, setProfile] = useState(PROFILES.some((p) => p.value === searchParams.get('profil')) ? searchParams.get('profil') : 'particulier');
   const [form, setForm] = useState({ email: '', password: '' });
 
   // Une erreur restée dans le store depuis une autre page (inscription…) ne doit pas s'afficher ici.
@@ -61,7 +62,7 @@ export default function Login() {
                 type="button"
                 key={opt.value}
                 onClick={() => setProfile(opt.value)}
-                className={`rounded border px-3 py-2 text-sm font-semibold transition ${
+                className={`rounded border px-3 py-2 text-sm font-semibold transition last:odd:col-span-2 ${
                   profile === opt.value
                     ? 'border-primary bg-primary-fixed text-on-primary-fixed-variant'
                     : 'border-outline-variant text-on-surface-variant'

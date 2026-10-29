@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, Navigate, useNavigate } from 'react-router-dom';
+import useAuthStore from '../store/useAuthStore';
+import { ROLE_HOME } from '../lib/roleHome';
 import serviceProviderService from '../services/serviceProviderService';
 import Card from '../components/common/Card';
 import Input from '../components/common/Input';
@@ -22,6 +24,8 @@ const EMPTY_FORM = {
   sex: '',
   email: '',
   phone: '',
+  password: '',
+  password_confirmation: '',
   profession: '',
   profession_other: '',
   city: '',
@@ -39,6 +43,8 @@ const BENEFITS = [
 // Inscription publique des prestataires de services (plombiers, coiffeuses, informaticiens…).
 // Pas de compte à créer : la candidature est examinée par l'administration, qui rappelle la personne.
 export default function Prestataires() {
+  const navigate = useNavigate();
+  const { user, login } = useAuthStore();
   const [professions, setProfessions] = useState(FALLBACK_PROFESSIONS);
   const [form, setForm] = useState(EMPTY_FORM);
   const [fieldErrors, setFieldErrors] = useState({});
@@ -62,12 +68,23 @@ export default function Prestataires() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (form.password !== form.password_confirmation) {
+      setFieldErrors({ password_confirmation: ['Les deux mots de passe ne correspondent pas.'] });
+      return;
+    }
     setSending(true);
     setError('');
     setFieldErrors({});
     try {
       await serviceProviderService.apply({ ...form, sex: form.sex || null, profession_other: form.profession === 'autre' ? form.profession_other : null });
-      setSent(true);
+      // Compte créé : connexion immédiate, l'espace prestataire affiche l'état du dossier.
+      try {
+        const logged = await login(form.email, form.password, 'prestataire');
+        navigate(ROLE_HOME[logged.role] ?? '/', { replace: true });
+        return;
+      } catch {
+        setSent(true);
+      }
       setForm(EMPTY_FORM);
     } catch (err) {
       const errors = err.response?.data?.errors ?? {};
@@ -84,6 +101,9 @@ export default function Prestataires() {
     }
   }
 
+  // Un prestataire déjà connecté n'a plus rien à remplir ici : il retrouve ses offres.
+  if (user?.role === 'prestataire') return <Navigate to={ROLE_HOME.prestataire} replace />;
+
   return (
     <div className="mx-auto max-w-[1200px] px-4 py-16 sm:px-10 sm:py-24">
       <div className="mx-auto max-w-2xl text-center">
@@ -92,6 +112,12 @@ export default function Prestataires() {
         </h1>
         <p className="mt-4 text-lg text-on-surface-variant">
           Plombiers, électriciens, coiffeuses, informaticiens… Inscrivez-vous pour proposer vos services aux clients de LIV corp.
+        </p>
+        <p className="mt-4 text-sm text-on-surface-variant">
+          Déjà inscrit ?{' '}
+          <Link to="/connexion?profil=prestataire" className="font-semibold text-secondary">
+            Se connecter et voir les offres
+          </Link>
         </p>
       </div>
 
@@ -120,12 +146,12 @@ export default function Prestataires() {
         <Card className="lg:col-span-3">
           {sent ? (
             <div role="status" className="py-6 text-center">
-              <h2 className="font-display text-xl font-bold text-primary">Candidature envoyée</h2>
+              <h2 className="font-display text-xl font-bold text-primary">Compte créé</h2>
               <p className="mt-2 text-sm text-on-surface-variant">
-                Merci ! Notre équipe examine votre profil et vous recontacte par téléphone ou par e-mail.
+                Merci ! Connectez-vous : les offres s'ouvrent dès que notre équipe a validé votre dossier.
               </p>
               <Button variant="secondary" className="mt-6" onClick={() => setSent(false)}>
-                Déposer une autre candidature
+                Revenir au formulaire
               </Button>
             </div>
           ) : (
@@ -179,12 +205,17 @@ export default function Prestataires() {
 
               <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
                 <Input label="Téléphone" type="tel" name="phone" autoComplete="tel" placeholder="+229 …" required value={form.phone} onChange={(e) => update('phone', e.target.value)} error={fieldErrors.phone?.[0]} />
-                <Input label="E-mail (facultatif)" type="email" name="email" autoComplete="email" value={form.email} onChange={(e) => update('email', e.target.value)} error={fieldErrors.email?.[0]} />
+                <Input label="E-mail" type="email" name="email" autoComplete="email" required value={form.email} onChange={(e) => update('email', e.target.value)} error={fieldErrors.email?.[0]} />
               </div>
 
               <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
                 <Input label="Ville" name="city" required value={form.city} onChange={(e) => update('city', e.target.value)} placeholder="Cotonou, Porto-Novo…" error={fieldErrors.city?.[0]} />
                 <Input label="Quartier (facultatif)" name="address" value={form.address} onChange={(e) => update('address', e.target.value)} error={fieldErrors.address?.[0]} />
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 min-[420px]:grid-cols-2">
+                <Input label="Mot de passe" type="password" name="password" autoComplete="new-password" required minLength={8} value={form.password} onChange={(e) => update('password', e.target.value)} hint="8 caractères minimum, avec majuscule, minuscule et chiffre." error={fieldErrors.password?.[0]} />
+                <Input label="Confirmer le mot de passe" type="password" name="password_confirmation" autoComplete="new-password" required value={form.password_confirmation} onChange={(e) => update('password_confirmation', e.target.value)} error={fieldErrors.password_confirmation?.[0]} />
               </div>
 
               <Input

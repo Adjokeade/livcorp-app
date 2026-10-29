@@ -8,7 +8,7 @@ import { formatFcfa } from '../../lib/format';
 import { Badge, Pager, SearchInput, Select, useDebounced } from './adminUi';
 import { Loading } from './AdminBackOffice';
 
-const ROLE = { client: 'Client', livreur: 'Livreur', commercant: 'Commerçant' };
+const ROLE = { client: 'Client', livreur: 'Livreur', commercant: 'Commerçant', prestataire: 'Prestataire' };
 
 const isCompanyOwner = (u) => u.role === 'client' && u.account_type === 'entreprise' && !u.company_id;
 
@@ -132,7 +132,7 @@ export default function AdminUsers() {
     <div>
       <div className="flex flex-wrap items-center gap-3">
         <SearchInput value={q} onChange={setQ} placeholder="Nom, e-mail, téléphone, entreprise…" />
-        <Select label="Catégorie" value={category} onChange={setCategory} options={[['', 'Toutes les catégories'], ['particulier', 'Particuliers'], ['entreprise', 'Entreprises'], ['conciergerie', 'Conciergeries'], ['livreur', 'Livreurs'], ['commercant', 'Commerçants']]} />
+        <Select label="Catégorie" value={category} onChange={setCategory} options={[['', 'Toutes les catégories'], ['particulier', 'Particuliers'], ['entreprise', 'Entreprises'], ['conciergerie', 'Conciergeries'], ['livreur', 'Livreurs'], ['prestataire', 'Prestataires'], ['commercant', 'Commerçants']]} />
         <Select label="Statut" value={status} onChange={setStatus} options={[['', 'Tous les statuts'], ['active', 'Actifs'], ['inactive', 'Désactivés']]} />
         {result && <span className="text-sm text-on-surface-variant">{result.total} compte{result.total > 1 ? 's' : ''}</span>}
       </div>

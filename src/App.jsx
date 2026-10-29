@@ -12,6 +12,8 @@ import About from './pages/About';
 import Marketplace from './pages/Marketplace';
 import Conciergerie from './pages/Conciergerie';
 import Prestataires from './pages/Prestataires';
+import ProviderOffers from './pages/provider/ProviderOffers';
+import ServiceRequests from './pages/client/ServiceRequests';
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
 import RegisterDeliverer from './pages/auth/RegisterDeliverer';
@@ -89,7 +91,7 @@ export default function App() {
         <Route
           path="/profil"
           element={
-            <ProtectedRoute roles={['client', 'livreur', 'commercant']}>
+            <ProtectedRoute roles={['client', 'livreur', 'commercant', 'prestataire']}>
               <Profile />
             </ProtectedRoute>
           }
@@ -165,6 +167,25 @@ export default function App() {
           element={
             <ProtectedRoute roles={['client']}>
               <OrderTracking />
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/client/services"
+          element={
+            <ProtectedRoute roles={['client']}>
+              <ServiceRequests />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* --- Prestataire --- */}
+        <Route
+          path="/prestataire/offres"
+          element={
+            <ProtectedRoute roles={['prestataire']}>
+              <ProviderOffers />
             </ProtectedRoute>
           }
         />

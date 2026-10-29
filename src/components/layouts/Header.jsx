@@ -19,13 +19,18 @@ const NAV_LINKS = [
   { to: '/', label: 'Accueil' },
   { to: '/annonces', label: 'Annonces' },
   { to: '/conciergerie', label: 'Conciergerie' },
-  { to: '/prestataires', label: 'Prestataires' },
   { to: '/contact', label: 'Contactez-nous' },
   { to: '/a-propos', label: 'À propos' },
 ];
 
 export default function Header() {
   const { user, logout } = useAuthStore();
+  // Prestations : inscription et connexion des prestataires ; une fois connecté, l'entrée mène aux offres.
+  const links = [
+    ...NAV_LINKS.slice(0, 3),
+    user?.role === 'prestataire' ? { to: '/prestataire/offres', label: 'Offres de prestation' } : { to: '/prestataires', label: 'Prestations' },
+    ...NAV_LINKS.slice(3),
+  ];
   const navigate = useNavigate();
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -41,7 +46,7 @@ export default function Header() {
         <Logo />
 
         <nav className="hidden items-center gap-6 text-sm font-medium text-on-surface-variant lg:flex">
-          {NAV_LINKS.map((link) => (
+          {links.map((link) => (
             <Link key={link.to} to={link.to}>
               {link.label}
             </Link>
@@ -97,7 +102,7 @@ export default function Header() {
       {menuOpen && (
         <nav className="border-t border-outline-variant bg-surface px-4 py-4 lg:hidden">
           <ul className="flex flex-col gap-1 text-sm font-medium text-on-surface-variant">
-            {NAV_LINKS.map((link) => (
+            {links.map((link) => (
               <li key={link.to}>
                 <Link
                   to={link.to}

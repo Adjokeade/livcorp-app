@@ -30,13 +30,18 @@ class ServiceProvider extends Model
     ];
 
     protected $fillable = [
-        'first_name', 'last_name', 'sex', 'email', 'phone', 'profession', 'profession_other', 'city', 'address',
+        'user_id', 'first_name', 'last_name', 'sex', 'email', 'phone', 'profession', 'profession_other', 'city', 'address',
         'experience_years', 'description', 'status', 'rejection_reason', 'reviewed_at', 'reviewed_by',
     ];
 
     protected function casts(): array
     {
         return ['reviewed_at' => 'datetime', 'experience_years' => 'integer'];
+    }
+
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
     }
 
     public function reviewer(): BelongsTo

@@ -8,13 +8,16 @@ use App\Models\User;
 use App\Notifications\ServiceProviderApplied;
 use App\Services\AuditLogService;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\ValidationException;
+use Illuminate\Validation\Rules\Password;
 
 /**
- * Inscription des prestataires de services (plombiers, coiffeuses, informaticiens…) : formulaire public,
- * sans compte. La candidature attend la décision de l'administration.
+ * Inscription des prestataires de services (plombiers, coiffeuses, informaticiens…) : formulaire public qui
+ * crée le compte (rôle "prestataire") et la candidature. Le prestataire peut se connecter tout de suite, mais
+ * ne voit les offres de prestation qu'une fois son dossier validé par l'administration.
  */
 class ServiceProviderController extends Controller
 {
@@ -32,8 +35,9 @@ class ServiceProviderController extends Controller
             'first_name' => 'required|string|max:100',
             'last_name' => 'required|string|max:100',
             'sex' => 'nullable|in:homme,femme',
-            'email' => 'nullable|email|max:255',
-            'phone' => 'required|string|min:8|max:20',
+            'email' => 'required|email|max:255|unique:users,email',
+            'phone' => 'required|string|min:8|max:20|unique:users,phone',
+            'password' => ['required', 'confirmed', Password::min(8)->mixedCase()->numbers()],
             'profession' => ['required', Rule::in(array_keys(ServiceProvider::PROFESSIONS))],
             'profession_other' => ['nullable', 'required_if:profession,autre', 'string', 'max:100'],
             'city' => 'required|string|max:100',
@@ -46,20 +50,31 @@ class ServiceProviderController extends Controller
             $validated['profession_other'] = null;
         }
 
-        // Un même numéro ne dépose pas deux candidatures actives : on évite les doublons dans la file de l'administration.
-        $duplicate = ServiceProvider::where('phone', $validated['phone'])->whereIn('status', ['pending', 'approved'])->exists();
-        if ($duplicate) {
-            throw ValidationException::withMessages(['phone' => 'Une candidature existe déjà avec ce numéro de téléphone.']);
-        }
+        $provider = DB::transaction(function () use ($validated) {
+            $user = User::create([
+                'role' => 'prestataire',
+                'first_name' => $validated['first_name'],
+                'last_name' => $validated['last_name'],
+                'sex' => $validated['sex'] ?? null,
+                'address' => $validated['city'],
+                'email' => $validated['email'],
+                'phone' => $validated['phone'],
+                'password' => Hash::make($validated['password']),
+            ]);
 
-        $provider = ServiceProvider::create($validated);
+            if (! config('app.email_verification_required')) {
+                $user->forceFill(['email_verified_at' => now()])->save();
+            }
+
+            return ServiceProvider::create(collect($validated)->except(['password', 'password_confirmation'])->all() + ['user_id' => $user->id]);
+        });
 
         $this->auditLog->log('service_provider.applied', $provider);
 
         rescue(fn () => Notification::send(User::where('role', 'admin')->where('is_active', true)->get(), new ServiceProviderApplied($provider)));
 
         return response()->json([
-            'message' => 'Votre candidature est bien reçue. Notre équipe l\'examine et vous recontacte au plus vite.',
+            'message' => 'Votre compte est créé. Connectez-vous : les offres s\'ouvrent dès que notre équipe a validé votre dossier.',
         ], 201);
     }
 }

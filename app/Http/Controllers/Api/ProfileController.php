@@ -40,6 +40,7 @@ class ProfileController extends Controller
         return $user->fresh()->load([
             'deliverer',
             'merchant',
+            'serviceProvider',
             'documents' => fn ($q) => $q->select('id', 'user_id', 'type', 'status'),
         ]);
     }

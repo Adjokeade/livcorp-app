@@ -70,11 +70,17 @@ class User extends Authenticatable implements MustVerifyEmail
     public function isCommercant(): bool { return $this->role === 'commercant'; }
     public function isLivreur(): bool { return $this->role === 'livreur'; }
     public function isAdmin(): bool { return $this->role === 'admin'; }
+    public function isPrestataire(): bool { return $this->role === 'prestataire'; }
 
     // --- Relations ---
     public function deliverer(): HasOne
     {
         return $this->hasOne(Deliverer::class);
+    }
+
+    public function serviceProvider(): HasOne
+    {
+        return $this->hasOne(ServiceProvider::class);
     }
 
     public function merchant(): HasOne

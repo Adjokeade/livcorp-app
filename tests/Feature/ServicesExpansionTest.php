@@ -50,6 +50,8 @@ class ServicesExpansionTest extends TestCase
             'sex' => 'homme',
             'email' => 'paul@test.bj',
             'phone' => '+22901000060',
+            'password' => 'Passw0rdX',
+            'password_confirmation' => 'Passw0rdX',
             'profession' => 'plombier',
             'city' => 'Cotonou',
             'experience_years' => 6,
@@ -177,46 +179,49 @@ class ServicesExpansionTest extends TestCase
             ->assertJsonFragment(['value' => 'informaticien']);
     }
 
-    public function test_provider_applies_without_an_account(): void
+    public function test_provider_applying_gets_an_account_and_a_pending_application(): void
     {
         $this->postJson('/api/v1/service-providers', $this->provider())->assertCreated();
 
         $this->assertDatabaseHas('service_providers', ['phone' => '+22901000060', 'status' => 'pending', 'profession' => 'plombier']);
+        $user = User::where('email', 'paul@test.bj')->first();
+        $this->assertSame('prestataire', $user->role);
+        $this->assertSame($user->id, ServiceProvider::first()->user_id);
     }
 
     public function test_provider_application_is_validated(): void
     {
+        $this->withoutMiddleware(\Illuminate\Routing\Middleware\ThrottleRequests::class);
         $this->postJson('/api/v1/service-providers', [])->assertUnprocessable()
-            ->assertJsonValidationErrors(['first_name', 'last_name', 'phone', 'profession', 'city', 'experience_years', 'description']);
+            ->assertJsonValidationErrors(['first_name', 'last_name', 'email', 'password', 'phone', 'profession', 'city', 'experience_years', 'description']);
 
         $this->postJson('/api/v1/service-providers', $this->provider(['profession' => 'sorcier']))->assertUnprocessable()->assertJsonValidationErrors('profession');
         $this->postJson('/api/v1/service-providers', $this->provider(['profession' => 'autre']))->assertUnprocessable()->assertJsonValidationErrors('profession_other');
         $this->postJson('/api/v1/service-providers', $this->provider(['description' => 'trop court']))->assertUnprocessable()->assertJsonValidationErrors('description');
+        $this->postJson('/api/v1/service-providers', $this->provider(['password' => 'faible']))->assertUnprocessable()->assertJsonValidationErrors('password');
         $this->postJson('/api/v1/service-providers', $this->provider(['experience_years' => -1]))->assertUnprocessable()->assertJsonValidationErrors('experience_years');
     }
 
     public function test_other_profession_keeps_its_label_and_known_ones_drop_it(): void
     {
         $this->postJson('/api/v1/service-providers', $this->provider(['profession' => 'autre', 'profession_other' => 'Photographe']))->assertCreated();
-        $this->postJson('/api/v1/service-providers', $this->provider(['phone' => '+22901000061', 'profession_other' => 'Ignoré']))->assertCreated();
+        $this->postJson('/api/v1/service-providers', $this->provider(['phone' => '+22901000061', 'email' => 'p2@test.bj', 'profession_other' => 'Ignoré']))->assertCreated();
 
         $this->assertSame('Photographe', ServiceProvider::where('profession', 'autre')->value('profession_other'));
         $this->assertNull(ServiceProvider::where('profession', 'plombier')->value('profession_other'));
     }
 
-    public function test_same_phone_cannot_apply_twice_unless_refused(): void
+    public function test_same_phone_or_email_cannot_register_twice(): void
     {
         $this->postJson('/api/v1/service-providers', $this->provider())->assertCreated();
-        $this->postJson('/api/v1/service-providers', $this->provider())->assertUnprocessable()->assertJsonValidationErrors('phone');
-
-        ServiceProvider::query()->update(['status' => 'rejected']);
-        $this->postJson('/api/v1/service-providers', $this->provider())->assertCreated();
+        $this->postJson('/api/v1/service-providers', $this->provider(['email' => 'autre@test.bj']))->assertUnprocessable()->assertJsonValidationErrors('phone');
+        $this->postJson('/api/v1/service-providers', $this->provider(['phone' => '+22901000099']))->assertUnprocessable()->assertJsonValidationErrors('email');
     }
 
     public function test_admin_reviews_provider_applications(): void
     {
         $this->postJson('/api/v1/service-providers', $this->provider())->assertCreated();
-        $this->postJson('/api/v1/service-providers', $this->provider(['phone' => '+22901000062', 'first_name' => 'Rose', 'profession' => 'coiffeur']))->assertCreated();
+        $this->postJson('/api/v1/service-providers', $this->provider(['phone' => '+22901000062', 'email' => 'rose@test.bj', 'first_name' => 'Rose', 'profession' => 'coiffeur']))->assertCreated();
         $admin = $this->admin();
         $this->actingAs($admin, 'sanctum');
 
@@ -251,5 +256,120 @@ class ServicesExpansionTest extends TestCase
         $this->getJson('/api/v1/admin/service-providers')->assertForbidden();
         $this->postJson("/api/v1/admin/service-providers/{$id}/approve")->assertForbidden();
         $this->assertSame('pending', ServiceProvider::find($id)->status);
+    }
+
+    // --- Connexion et offres de prestation ---
+
+    private function approvedProvider(string $profession = 'plombier', string $suffix = '1'): User
+    {
+        $this->postJson('/api/v1/service-providers', $this->provider([
+            'email' => "prest{$suffix}@test.bj", 'phone' => '+2290110000'.$suffix, 'profession' => $profession,
+        ]))->assertCreated();
+        $user = User::where('email', "prest{$suffix}@test.bj")->first();
+        $user->serviceProvider->update(['status' => 'approved']);
+
+        return $user;
+    }
+
+    private function client(): User
+    {
+        $this->postJson('/api/v1/auth/register', $this->conciergerie(['account_type' => 'particulier', 'sex' => 'homme', 'company_name' => null, 'email' => 'cl@test.bj', 'phone' => '+22901000077']))->assertCreated();
+
+        return User::where('email', 'cl@test.bj')->first();
+    }
+
+    private function offer(User $client, array $overrides = []): int
+    {
+        return $this->actingAs($client, 'sanctum')->postJson('/api/v1/client/service-requests', $overrides + [
+            'profession' => 'plombier', 'title' => 'Fuite sous évier', 'description' => 'Une fuite importante sous mon évier.',
+            'city' => 'Cotonou', 'budget' => 15000,
+        ])->assertCreated()->json('id');
+    }
+
+    public function test_provider_logs_in_and_sees_pending_status_but_no_offers_until_validated(): void
+    {
+        $this->postJson('/api/v1/service-providers', $this->provider())->assertCreated();
+
+        $this->postJson('/api/v1/auth/login', ['email' => 'paul@test.bj', 'password' => 'Passw0rdX', 'category' => 'prestataire'])
+            ->assertOk()->assertJsonPath('user.role', 'prestataire')->assertJsonPath('user.service_provider.status', 'pending');
+
+        $user = User::where('email', 'paul@test.bj')->first();
+        $this->actingAs($user, 'sanctum')->getJson('/api/v1/provider/offers')->assertForbidden();
+        $this->getJson('/api/v1/auth/me')->assertJsonPath('service_provider.status', 'pending');
+    }
+
+    public function test_provider_login_category_must_match(): void
+    {
+        $this->postJson('/api/v1/service-providers', $this->provider())->assertCreated();
+
+        $this->postJson('/api/v1/auth/login', ['email' => 'paul@test.bj', 'password' => 'Passw0rdX', 'category' => 'livreur'])->assertUnprocessable();
+    }
+
+    public function test_approved_provider_sees_only_open_offers_of_their_profession(): void
+    {
+        $client = $this->client();
+        $plumbing = $this->offer($client);
+        $this->offer($client, ['profession' => 'coiffeur', 'title' => 'Coiffure mariage']);
+        $provider = $this->approvedProvider();
+
+        $this->actingAs($provider, 'sanctum')->getJson('/api/v1/provider/offers')
+            ->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $plumbing)
+            ->assertJsonPath('data.0.client_name', 'Koffi')->assertJsonPath('data.0.client_phone', null);
+
+        $this->getJson('/api/v1/provider/offers?city=Porto')->assertJsonCount(0, 'data');
+        $this->getJson('/api/v1/provider/offers?q=évier')->assertJsonCount(1, 'data');
+    }
+
+    public function test_provider_takes_an_offer_and_gets_the_client_contact_once(): void
+    {
+        $client = $this->client();
+        $id = $this->offer($client, ['address' => 'Haie Vive, rue 12']);
+        $first = $this->approvedProvider('plombier', '1');
+        $second = $this->approvedProvider('plombier', '2');
+
+        $this->actingAs($first, 'sanctum')->postJson("/api/v1/provider/offers/{$id}/accept")
+            ->assertOk()->assertJsonPath('status', 'taken')->assertJsonPath('client_phone', '+22901000077')->assertJsonPath('address', 'Haie Vive, rue 12');
+        $this->getJson('/api/v1/provider/offers/mine')->assertJsonCount(1, 'data');
+
+        $this->actingAs($second, 'sanctum')->postJson("/api/v1/provider/offers/{$id}/accept")->assertStatus(409);
+        $this->getJson('/api/v1/provider/offers')->assertJsonCount(0, 'data');
+
+        $this->actingAs($client, 'sanctum')->getJson('/api/v1/client/service-requests')
+            ->assertJsonPath('data.0.status', 'taken')->assertJsonPath('data.0.provider.phone', '+2290110000'.'1');
+    }
+
+    public function test_provider_cannot_take_an_offer_of_another_profession(): void
+    {
+        $id = $this->offer($this->client(), ['profession' => 'coiffeur']);
+        $provider = $this->approvedProvider('plombier');
+
+        $this->actingAs($provider, 'sanctum')->postJson("/api/v1/provider/offers/{$id}/accept")->assertForbidden();
+        $this->assertSame('open', \App\Models\ServiceRequest::find($id)->status);
+    }
+
+    public function test_client_validates_cancels_and_owns_requests(): void
+    {
+        $client = $this->client();
+        $this->actingAs($client, 'sanctum')->postJson('/api/v1/client/service-requests', [])
+            ->assertUnprocessable()->assertJsonValidationErrors(['profession', 'title', 'description', 'city']);
+
+        $id = $this->offer($client);
+        $this->postJson("/api/v1/client/service-requests/{$id}/cancel")->assertOk()->assertJsonPath('status', 'cancelled');
+        $this->postJson("/api/v1/client/service-requests/{$id}/cancel")->assertUnprocessable();
+
+        $other = User::create(['role' => 'client', 'account_type' => 'particulier', 'first_name' => 'X', 'last_name' => 'Y', 'email' => 'x@test.bj', 'phone' => '+22901000088', 'password' => 'Passw0rdX', 'is_active' => true]);
+        $open = $this->offer($client);
+        $this->actingAs($other, 'sanctum')->postJson("/api/v1/client/service-requests/{$open}/cancel")->assertNotFound();
+        $this->getJson('/api/v1/client/service-requests')->assertJsonCount(0, 'data');
+    }
+
+    public function test_offer_areas_are_closed_to_other_roles(): void
+    {
+        $client = $this->client();
+        $this->actingAs($client, 'sanctum')->getJson('/api/v1/provider/offers')->assertForbidden();
+
+        $provider = $this->approvedProvider();
+        $this->actingAs($provider, 'sanctum')->postJson('/api/v1/client/service-requests', [])->assertForbidden();
+        $this->getJson('/api/v1/admin/service-providers')->assertForbidden();
     }
 }

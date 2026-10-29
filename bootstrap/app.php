@@ -33,6 +33,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'role' => EnsureUserHasRole::class,
             'verified.email' => EnsureEmailIsVerified::class,
             'deliverer.verified' => EnsureDelivererIsVerified::class,
+            'provider.approved' => \App\Http\Middleware\EnsureProviderIsApproved::class,
         ]);
 
         // Rate limiting sur les routes sensibles (connexion, paiement) — cf. exigence sécurité

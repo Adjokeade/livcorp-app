@@ -18,7 +18,9 @@ use App\Http\Controllers\Api\Client\OrderController as ClientOrderController;
 use App\Http\Controllers\Api\AvatarController;
 use App\Http\Controllers\Api\Client\FavoriteDelivererController;
 use App\Http\Controllers\Api\Client\RecipientController;
+use App\Http\Controllers\Api\Client\ServiceRequestController;
 use App\Http\Controllers\Api\Client\TeamController;
+use App\Http\Controllers\Api\Provider\OfferController as ProviderOfferController;
 use App\Http\Controllers\Api\Client\PaymentController;
 use App\Http\Controllers\Api\Client\ReviewController as ClientReviewController;
 use App\Http\Controllers\Api\ContactMessageController;
@@ -138,6 +140,9 @@ Route::prefix('v1')->group(function () {
             Route::post('/orders', [ClientOrderController::class, 'store']);
             Route::post('/orders/batch', [ClientOrderController::class, 'storeBatch'])->middleware('throttle:10,1');
             Route::get('/stats', [ClientOrderController::class, 'stats']);
+            Route::get('/service-requests', [ServiceRequestController::class, 'index']);
+            Route::post('/service-requests', [ServiceRequestController::class, 'store'])->middleware('throttle:20,1');
+            Route::post('/service-requests/{serviceRequest}/cancel', [ServiceRequestController::class, 'cancel']);
             Route::get('/team', [TeamController::class, 'index']);
             Route::post('/team', [TeamController::class, 'store'])->middleware('throttle:20,1');
             Route::patch('/team/{member}', [TeamController::class, 'update']);
@@ -178,6 +183,14 @@ Route::prefix('v1')->group(function () {
             Route::post('/orders/{order}/unreachable', [DelivererDeliveryController::class, 'unreachable'])->middleware('throttle:10,1');
             Route::patch('/orders/{order}/status', [DelivererOrderController::class, 'updateStatus']);
             Route::post('/orders/{order}/location', [DelivererOrderController::class, 'pushLocation']);
+        });
+
+        // ===== PRESTATAIRE =====
+        // Les offres de prestation ne s'ouvrent qu'une fois le dossier validé par l'administration.
+        Route::middleware(['role:prestataire', 'verified.email', 'provider.approved'])->prefix('provider')->group(function () {
+            Route::get('/offers', [ProviderOfferController::class, 'index']);
+            Route::get('/offers/mine', [ProviderOfferController::class, 'mine']);
+            Route::post('/offers/{serviceRequest}/accept', [ProviderOfferController::class, 'accept'])->middleware('throttle:30,1');
         });
 
         // ===== COMMERÇANT =====
